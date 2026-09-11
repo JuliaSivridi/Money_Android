@@ -458,9 +458,26 @@ fixed above.
 - [x] `HelpScreen`: static content (Basics, Data & sync, Usage tips) (§8.7)
 - [x] `FeedbackScreen`: POST to Apps Script endpoint, `app=Money`,
       `instanceFollowRedirects = false` (§8.8) — **reuses the Tasks Android
-      sibling's Apps Script URL**, since that endpoint is evidently shared
-      across the author's apps and differentiated by the `app` field; confirm
-      it actually accepts `app=Money` server-side, or swap in a dedicated URL
+      sibling's Apps Script URL**. Root-caused and resolved, entirely outside
+      this codebase: on-device testing (v1.0) hit `HTTP 403`; client code
+      was confirmed byte-identical to Tasks Android's own working
+      `FeedbackViewModel.kt` (only the `app` string literal differs) and the
+      script itself has no per-app origin check, so it was never a Money- or
+      Android-specific bug. Tasks Android hit the identical `HTTP 403` on
+      its own hardcoded (non-secret-driven) URL, which ruled out the user's
+      first theory (a `VITE_FEEDBACK_URL` GitHub secret lost in an old
+      Vercel→GitHub Pages migration for the web apps — checked afterward:
+      every PWA already has that secret set correctly, so this was never
+      actually broken). The real cause: the Apps Script Web App deployment's
+      authorization had lapsed — Google periodically requires the deploying
+      account to re-consent — so every call was rejected at Google's access
+      layer before reaching the script at all (Executions log was completely
+      empty even for real send attempts, confirming the block was pre-script).
+      Opening the `/exec` URL directly in a browser as the script owner
+      re-triggered that consent prompt; accepting it fixed delivery for
+      every caller at once — verified by the user across Tasks, Money, and
+      two other apps sharing the same Apps Script deployment. No code change
+      needed; this app's `FeedbackScreen` was correct all along.
 - [x] `AboutScreen`: `BuildConfig.VERSION_NAME` + "Check for updates" link to
       `github.com/JuliaSivridi/Money_Android/releases` (§17 resolved item 4)
       — repo URL guessed from the Tasks Android sibling's naming convention;
