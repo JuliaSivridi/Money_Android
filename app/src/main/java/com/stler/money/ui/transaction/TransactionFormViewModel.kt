@@ -10,6 +10,7 @@ import com.stler.money.domain.model.Transaction
 import com.stler.money.ui.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
@@ -33,16 +34,26 @@ class TransactionFormViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun save(transaction: Transaction, isEdit: Boolean, onDone: () -> Unit) = safeLaunch {
-        val withBase = transaction.copy(
-            amountBase = convertToBase(
-                amount = transaction.amount,
-                currency = transaction.currency,
-                baseCurrency = exchangeRateRepository.baseCurrency.value,
-                rates = exchangeRateRepository.rates.value,
-            )
-        )
+        val withBase = transaction.copy(amountBase = computeAmountBase(transaction.amount, transaction.currency))
         if (isEdit) transactionRepository.updateTransaction(withBase) else transactionRepository.createTransaction(withBase)
         onDone()
+    }
+
+    /**
+     * Only fetches the same-currency history fallback (a real Room query) when there's no live
+     * rate to begin with — the common case (a rate is cached) stays exactly one Map lookup.
+     */
+    private suspend fun computeAmountBase(amount: Double, currency: String): Double {
+        val baseCurrency = exchangeRateRepository.baseCurrency.value
+        val rates = exchangeRateRepository.rates.value
+        if (currency == baseCurrency || rates.containsKey(currency)) {
+            return convertToBase(amount, currency, baseCurrency, rates)
+        }
+        val history = transactionRepository.observeAll().first()
+            .filter { it.currency == currency }
+            .sortedByDescending { it.createdAt }
+            .take(HISTORY_SAMPLE_SIZE)
+        return convertToBase(amount, currency, baseCurrency, rates, sameCurrencyHistory = history)
     }
 
     /**
@@ -61,14 +72,7 @@ class TransactionFormViewModel @Inject constructor(
             createdAt = now,
             updatedAt = now,
         )
-        val withBase = repayment.copy(
-            amountBase = convertToBase(
-                amount = repayment.amount,
-                currency = repayment.currency,
-                baseCurrency = exchangeRateRepository.baseCurrency.value,
-                rates = exchangeRateRepository.rates.value,
-            )
-        )
+        val withBase = repayment.copy(amountBase = computeAmountBase(repayment.amount, repayment.currency))
         transactionRepository.createTransaction(withBase)
         onDone()
     }
@@ -76,5 +80,10 @@ class TransactionFormViewModel @Inject constructor(
     fun delete(id: String, onDone: () -> Unit) = safeLaunch {
         transactionRepository.deleteTransaction(id)
         onDone()
+    }
+
+    private companion object {
+        /** Sample size for the same-currency history fallback in [computeAmountBase]. */
+        const val HISTORY_SAMPLE_SIZE = 8
     }
 }

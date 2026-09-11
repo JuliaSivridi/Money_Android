@@ -42,11 +42,18 @@ class SyncManager @Inject constructor(
         }
     }
 
-    /** Schedules the 30-minute periodic sync if not already scheduled. Called from MoneyApplication.onCreate(). */
+    /**
+     * Schedules the 30-minute periodic sync if not already scheduled. Called from
+     * MoneyApplication.onCreate() — i.e. on every process start. KEEP, not UPDATE (spec §7):
+     * UPDATE replaces the existing periodic work every time, which resets its 30-minute timer
+     * from "now" on every single app open — on a phone that gets reopened more often than
+     * every 30 minutes, the periodic sync would come due but never actually fire. KEEP leaves
+     * an already-scheduled run alone and only enqueues fresh on a real first run.
+     */
     fun initialize() {
         workManager.enqueueUniquePeriodicWork(
             PERIODIC_WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<SyncWorker>(30, TimeUnit.MINUTES)
                 .setConstraints(networkConstraints)
                 .build(),

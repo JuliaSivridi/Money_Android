@@ -13,8 +13,6 @@ interface AccountRepository {
     /** Edit mode writes `balance` directly (drift-repair affordance) — tech spec §8.2. */
     suspend fun updateAccount(account: Account)
 
-    suspend fun deleteAccount(id: String)
-
     /** Applies [delta] to the account's balance — never mutate `balance` any other way. */
     suspend fun adjustBalance(accountId: String, delta: Double)
 

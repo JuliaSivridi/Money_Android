@@ -133,8 +133,13 @@ fun TransactionFormSheet(
     var showToAccountPicker by remember { mutableStateOf(false) }
 
     // Default the account once the list has loaded, if nothing was pre-selected.
+    // firstOrNull, not first — a non-empty list where every account happens to be archived
+    // (e.g. right after archiving the last active one) threw NoSuchElementException here;
+    // falling back to accounts.first() in that case still gives a real, pickable account.
     LaunchedEffect(accounts) {
-        if (accountId.isBlank() && accounts.isNotEmpty()) accountId = accounts.first { !it.archived }.id
+        if (accountId.isBlank() && accounts.isNotEmpty()) {
+            accountId = (accounts.firstOrNull { !it.archived } ?: accounts.first()).id
+        }
     }
 
     // Amount is what nearly every open of this sheet is actually for (account is

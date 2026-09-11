@@ -1,6 +1,7 @@
 package com.stler.money.di
 
 import com.google.gson.Gson
+import com.stler.money.BuildConfig
 import com.stler.money.data.remote.SheetsApi
 import com.stler.money.data.remote.TokenProvider
 import dagger.Module
@@ -9,6 +10,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
+import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -38,7 +40,10 @@ object NetworkModule {
                 )
             }
             .authenticator { _, response ->
-                // On 401: attempt token refresh once
+                // Bail after one retry — without this, a revoked grant whose refresh call still
+                // "succeeds" (returns a token Google then rejects again) retried forever instead
+                // of surfacing an error.
+                if (responseCount(response) >= 2) return@authenticator null
                 val newToken = runBlocking { tokenProvider.refreshToken() }
                     ?: return@authenticator null
                 response.request.newBuilder()
@@ -46,7 +51,11 @@ object NetworkModule {
                     .build()
             }
             .addInterceptor(
-                HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
+                HttpLoggingInterceptor().apply {
+                    // BASIC still logged full request URLs (including spreadsheet ids) in release
+                    // builds. Debug-only now.
+                    level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
+                }
             )
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
@@ -65,4 +74,15 @@ object NetworkModule {
     @Singleton
     fun provideSheetsApi(retrofit: Retrofit): SheetsApi =
         retrofit.create(SheetsApi::class.java)
+
+    /** Standard OkHttp recipe for counting how many times a request has already been retried via [Response.priorResponse]. */
+    private fun responseCount(response: Response): Int {
+        var result = 1
+        var prior = response.priorResponse
+        while (prior != null) {
+            result++
+            prior = prior.priorResponse
+        }
+        return result
+    }
 }

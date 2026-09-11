@@ -72,7 +72,13 @@ class CategoryRepositoryImpl @Inject constructor(
         updated.forEach { enqueue("category", "UPDATE", it.id, it) }
     }
 
-    /** See tech spec §16.7 — dedup prevents a transaction ending up with the same category ID twice. */
+    /**
+     * See tech spec §16.7 — dedup prevents a transaction ending up with the same category ID
+     * twice. The category DELETE enqueue happens *inside* the same `withTransaction` as the
+     * row deletion (previously after it) — a process death between the two used to leave the
+     * category gone locally with the DELETE never queued, so the next pull restored it from
+     * Sheets as if nothing happened.
+     */
     override suspend fun deleteCategoryWithTransfer(id: String, transferToId: String) {
         val now = nowIso()
         val affected = transactionDao.getByCategoryId(id)
@@ -95,15 +101,18 @@ class CategoryRepositoryImpl @Inject constructor(
                 enqueueTransaction(txn.id, updated)
             }
             categoryDao.deleteById(id)
+            enqueue("category", "DELETE", id, null)
         }
-        enqueue("category", "DELETE", id, null)
     }
 
     override suspend fun fetchAllAndSave(spreadsheetId: String) {
         val pendingIds = syncQueueDao.getAll().filter { it.entityType == "category" }.map { it.entityId }.toSet()
         val response = sheetsApi.batchGet(spreadsheetId, listOf("categories"))
-        val remote = response.valueRanges.firstOrNull()?.values?.drop(1)
-            ?.mapNotNull { mapper.rowToCategory(it) } ?: return
+        val values = response.valueRanges.firstOrNull()?.values
+        // See TransactionRepositoryImpl.fetchAllAndSave — no header row at all means don't
+        // trust this response enough to run deleteNotIn.
+        if (values.isNullOrEmpty()) return
+        val remote = values.drop(1).mapNotNull { mapper.rowToCategory(it) }
         categoryDao.upsertAll(remote.filter { it.id !in pendingIds })
         categoryDao.deleteNotIn(remote.map { it.id } + pendingIds)
     }

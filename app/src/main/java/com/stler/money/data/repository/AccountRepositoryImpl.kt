@@ -46,13 +46,12 @@ class AccountRepositoryImpl @Inject constructor(
         enqueue("account", "UPDATE", account.id, entity)
     }
 
-    override suspend fun deleteAccount(id: String) {
-        accountDao.deleteById(id)
-        enqueue("account", "DELETE", id, null)
-    }
-
     override suspend fun adjustBalance(accountId: String, delta: Double) {
-        val entity = accountDao.getById(accountId) ?: return
+        // Throws rather than silently no-op'ing on a missing account — called from inside
+        // TransactionRepositoryImpl's db.withTransaction, so this rolls back the whole
+        // transaction mutation instead of quietly dropping one side of a transfer's delta.
+        val entity = accountDao.getById(accountId)
+            ?: error("adjustBalance: account $accountId not found")
         val updated = entity.copy(balance = entity.balance + delta, updatedAt = nowIso())
         accountDao.upsert(updated)
         enqueue("account", "UPDATE", accountId, updated)
@@ -61,8 +60,11 @@ class AccountRepositoryImpl @Inject constructor(
     override suspend fun fetchAllAndSave(spreadsheetId: String) {
         val pendingIds = syncQueueDao.getAll().filter { it.entityType == "account" }.map { it.entityId }.toSet()
         val response = sheetsApi.batchGet(spreadsheetId, listOf("accounts"))
-        val remote = response.valueRanges.firstOrNull()?.values?.drop(1)
-            ?.mapNotNull { mapper.rowToAccount(it) } ?: return
+        val values = response.valueRanges.firstOrNull()?.values
+        // See TransactionRepositoryImpl.fetchAllAndSave — no header row at all means don't
+        // trust this response enough to run deleteNotIn.
+        if (values.isNullOrEmpty()) return
+        val remote = values.drop(1).mapNotNull { mapper.rowToAccount(it) }
         accountDao.upsertAll(remote.filter { it.id !in pendingIds })
         accountDao.deleteNotIn(remote.map { it.id } + pendingIds)
     }

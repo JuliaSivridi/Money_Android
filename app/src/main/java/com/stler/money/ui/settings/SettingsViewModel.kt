@@ -3,6 +3,7 @@ package com.stler.money.ui.settings
 import androidx.lifecycle.viewModelScope
 import com.stler.money.auth.AuthPreferences
 import com.stler.money.auth.GoogleAuthRepository
+import com.stler.money.data.local.dao.SyncQueueDao
 import com.stler.money.data.remote.dto.DriveFile
 import com.stler.money.data.repository.AccountRepository
 import com.stler.money.data.repository.CategoryRepository
@@ -28,6 +29,7 @@ class SettingsViewModel @Inject constructor(
     private val categoryRepository: CategoryRepository,
     private val exchangeRateRepository: ExchangeRateRepository,
     private val syncManager: SyncManager,
+    private val syncQueueDao: SyncQueueDao,
 ) : BaseViewModel() {
 
     val spreadsheetName = authPreferences.spreadsheetName
@@ -58,6 +60,14 @@ class SettingsViewModel @Inject constructor(
 
     fun switchSpreadsheet(id: String, name: String) = safeLaunch {
         _switching.value = true
+        // Drop pending ops for the OLD spreadsheet before anything else — signOut() does the
+        // same (see GoogleAuthRepository.signOut). Without this, any queued INSERT/UPDATE/DELETE
+        // survives clearAllLocalData() (that only clears the entity tables, not sync_queue) and
+        // gets pushed against the NEW spreadsheetId on the next sync, silently corrupting it with
+        // data from the old file. This doesn't fully close the race against an in-flight worker
+        // that already read the old queue into memory before this runs — acceptable for a
+        // deliberate, rare, user-initiated action, not worth coordinating WorkManager over.
+        syncQueueDao.deleteAll()
         authPreferences.setSpreadsheet(id, name)
         transactionRepository.clearAllLocalData()
         accountRepository.clearAllLocalData()

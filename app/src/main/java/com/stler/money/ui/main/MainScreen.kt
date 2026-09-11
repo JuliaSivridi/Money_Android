@@ -59,6 +59,9 @@ import com.stler.money.ui.transactions.TransactionsViewModel
 import com.stler.money.ui.util.ErrorSnackbarEffect
 import com.stler.money.ui.util.LocalSnackbarHostState
 
+/** Full-screen overlays reachable from the Menu tab — was a `List<String>` of magic names. */
+private enum class Overlay { Settings, Help, Feedback, About }
+
 /**
  * Bottom-nav-only app shell — tech spec §8 "Navigation shape" / §12. Tab order
  * is Accounts, Transactions, Categories, Analytics, Menu; the start
@@ -72,9 +75,9 @@ fun MainScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var overlayStack by remember { mutableStateOf(emptyList<String>()) }
+    var overlayStack by remember { mutableStateOf(emptyList<Overlay>()) }
     val currentOverlay = overlayStack.lastOrNull()
-    fun pushOverlay(screen: String) { overlayStack = overlayStack + screen }
+    fun pushOverlay(screen: Overlay) { overlayStack = overlayStack + screen }
     fun popOverlay() { overlayStack = overlayStack.dropLast(1) }
 
     var showTransactionForm by remember { mutableStateOf(false) }
@@ -293,10 +296,10 @@ fun MainScreen(
                         userName = authData.userName,
                         userEmail = authData.userEmail,
                         userAvatarUrl = authData.userAvatarUrl,
-                        onSettings = { pushOverlay("settings") },
-                        onHelp = { pushOverlay("help") },
-                        onFeedback = { pushOverlay("feedback") },
-                        onAbout = { pushOverlay("about") },
+                        onSettings = { pushOverlay(Overlay.Settings) },
+                        onHelp = { pushOverlay(Overlay.Help) },
+                        onFeedback = { pushOverlay(Overlay.Feedback) },
+                        onAbout = { pushOverlay(Overlay.About) },
                         onSignOut = onSignOut,
                     )
                 }
@@ -304,10 +307,11 @@ fun MainScreen(
         }
 
         when (currentOverlay) {
-            "settings" -> SettingsScreen(onNavigateBack = ::popOverlay)
-            "help" -> HelpScreen(onNavigateBack = ::popOverlay)
-            "feedback" -> FeedbackScreen(onNavigateBack = ::popOverlay)
-            "about" -> AboutScreen(onNavigateBack = ::popOverlay)
+            Overlay.Settings -> SettingsScreen(onNavigateBack = ::popOverlay)
+            Overlay.Help -> HelpScreen(onNavigateBack = ::popOverlay)
+            Overlay.Feedback -> FeedbackScreen(onNavigateBack = ::popOverlay)
+            Overlay.About -> AboutScreen(onNavigateBack = ::popOverlay)
+            null -> Unit
         }
     }
 

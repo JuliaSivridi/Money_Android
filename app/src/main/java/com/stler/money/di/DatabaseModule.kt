@@ -21,9 +21,12 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MoneyDatabase =
-        Room.databaseBuilder(context, MoneyDatabase::class.java, "money.db")
-            .fallbackToDestructiveMigration(dropAllTables = true)  // safety net; no legacy schema to preserve yet
-            .build()
+        // No fallbackToDestructiveMigration: at version 1 it was a no-op anyway (nothing to
+        // migrate from), but leaving it in was a footgun for the *next* schema bump — it
+        // would silently wipe money.db, sync_queue included, instead of forcing a real
+        // migration to be written. Room now crashes loudly on an unmigrated version bump,
+        // which is the outcome you actually want here.
+        Room.databaseBuilder(context, MoneyDatabase::class.java, "money.db").build()
 
     @Provides fun provideTransactionDao(db: MoneyDatabase): TransactionDao = db.transactionDao()
     @Provides fun provideAccountDao(db: MoneyDatabase): AccountDao = db.accountDao()

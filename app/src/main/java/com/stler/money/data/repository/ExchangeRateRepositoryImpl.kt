@@ -11,11 +11,13 @@ import com.stler.money.auth.AuthPreferences
 import com.stler.money.data.remote.SheetsApi
 import com.stler.money.data.remote.dto.ValuesBody
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -41,12 +43,17 @@ class ExchangeRateRepositoryImpl @Inject constructor(
     private val _baseCurrency = MutableStateFlow("EUR")
     override val baseCurrency: StateFlow<String> = _baseCurrency
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     init {
         // One-time local hydration so rates are available offline immediately on cold start —
-        // mirrors the PWA's exchangeRateStore persist-on-load behavior. A small DataStore
-        // read at singleton construction; acceptable one-off cost (same pattern Room's
-        // own databaseBuilder incurs).
-        runBlocking {
+        // mirrors the PWA's exchangeRateStore persist-on-load behavior. Async, not
+        // runBlocking: this used to block whatever thread constructs this Hilt singleton
+        // (often the main thread, while some other singleton's own init pulls this one in) —
+        // DataStore's first cold-start read does real disk I/O, real ANR material under
+        // contention. rates/baseCurrency just start at their defaults until this lands, same
+        // as any other async-loaded state.
+        scope.launch {
             val prefs = context.exchangeRateDataStore.data.first()
             prefs[RATES_JSON]?.let { json ->
                 runCatching {

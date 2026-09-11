@@ -240,6 +240,12 @@ class GoogleAuthRepository @Inject constructor(
         credential: GoogleIdTokenCredential,
     ) {
         val (spreadsheetId, spreadsheetName) = findOrCreateSpreadsheetWithName(accessToken)
+        // A blank id here means createSpreadsheet() failed (bad HTTP status, failed seed
+        // write) — saving it anyway used to "sign in" successfully with nothing to sync
+        // against: SyncWorker no-ops on a blank spreadsheetId, so the user landed on a
+        // silently empty MainScreen instead of seeing a sign-in error. signIn()'s runCatching
+        // turns this into a real AuthUiState.Error instead.
+        check(spreadsheetId.isNotBlank()) { "Could not find or create db_money — see logs for the underlying Drive/Sheets error" }
         authPreferences.saveAll(
             accessToken     = accessToken,
             tokenExpiry     = expiryInOneHour(),
@@ -301,21 +307,19 @@ class GoogleAuthRepository @Inject constructor(
                 }
             """.trimIndent()
 
-            val createResp = client.newCall(
+            val spreadsheetId = client.newCall(
                 Request.Builder()
                     .url("https://sheets.googleapis.com/v4/spreadsheets")
                     .header("Authorization", "Bearer $accessToken")
                     .post(createBody.toRequestBody(jsonType))
                     .build()
-            ).execute()
-
-            if (!createResp.isSuccessful) {
-                Log.e(TAG, "createSpreadsheet HTTP ${createResp.code}")
-                return@runCatching ""
+            ).execute().use { createResp ->
+                if (!createResp.isSuccessful) {
+                    Log.e(TAG, "createSpreadsheet HTTP ${createResp.code}")
+                    return@runCatching ""
+                }
+                JSONObject(createResp.body?.string() ?: "").getString("spreadsheetId")
             }
-
-            val spreadsheetId = JSONObject(createResp.body?.string() ?: "")
-                .getString("spreadsheetId")
             Log.i(TAG, "Created spreadsheet: $spreadsheetId")
 
             // ── Step 2: write headers + seed onboarding data ────────────────
@@ -382,7 +386,16 @@ class GoogleAuthRepository @Inject constructor(
                     .header("Authorization", "Bearer $accessToken")
                     .post(batchBody.toRequestBody(jsonType))
                     .build()
-            ).execute()
+            ).execute().use { batchResp ->
+                // Seeding Room unconditionally here — regardless of whether this write actually
+                // landed on Sheets — was the bug: a failed seed write (status never checked)
+                // still left the app looking fully set up locally, with Room state Sheets never
+                // received. Treat it as sign-in failure instead.
+                if (!batchResp.isSuccessful) {
+                    Log.e(TAG, "createSpreadsheet seed batchUpdate HTTP ${batchResp.code}")
+                    return@runCatching ""
+                }
+            }
 
             // ── Step 3: seed all onboarding data to Room so the app is usable immediately ───
             accountDao.upsertAll(

@@ -11,6 +11,5 @@ captures/
 *.keystore
 *.apk
 app/release/
-app/schemas/
 keystore.properties
 release-keystore-credentials.txt

@@ -46,43 +46,57 @@ class TransactionRepositoryImpl @Inject constructor(
     override suspend fun getById(id: String): Transaction? =
         transactionDao.getById(id)?.toDomain()
 
+    // create/update/delete each wrap the entity write, category refs, sync-queue enqueue, AND
+    // the account balance adjustment(s) in one `db.withTransaction` — previously these were
+    // separate steps, so a crash/process-death between them left `Account.balance` silently
+    // wrong forever (balance is denormalised, never recomputed from transaction history) and
+    // update's revert-then-reapply could double-apply one side on a partial failure. Now
+    // either all of it commits or none of it does; `adjustBalance` throwing on a missing
+    // account (AccountRepositoryImpl) rolls back the whole mutation instead of silently
+    // dropping a transfer's destination-side delta.
+
     override suspend fun createTransaction(transaction: Transaction) {
         val entity = transaction.toEntity()
         db.withTransaction {
             transactionDao.upsert(entity)
             writeCategoryRefs(transaction)
+            enqueue("transaction", "INSERT", transaction.id, entity)
+            applyDelta(transaction)
         }
-        enqueue("transaction", "INSERT", transaction.id, entity)
-        applyDelta(transaction)
     }
 
     override suspend fun updateTransaction(transaction: Transaction) {
-        val old = transactionDao.getById(transaction.id)?.toDomain()
         val entity = transaction.toEntity()
         db.withTransaction {
+            val old = transactionDao.getById(transaction.id)?.toDomain()
             transactionDao.upsert(entity)
             writeCategoryRefs(transaction)
+            enqueue("transaction", "UPDATE", transaction.id, entity)
+            if (old != null) reverseDelta(old)
+            applyDelta(transaction)
         }
-        enqueue("transaction", "UPDATE", transaction.id, entity)
-        if (old != null) reverseDelta(old)
-        applyDelta(transaction)
     }
 
     override suspend fun deleteTransaction(id: String) {
-        val old = transactionDao.getById(id)?.toDomain() ?: return
         db.withTransaction {
+            val old = transactionDao.getById(id)?.toDomain() ?: return@withTransaction
             transactionDao.deleteById(id)
             transactionDao.clearCategoryRefs(id)
+            enqueue("transaction", "DELETE", id, null)
+            reverseDelta(old)
         }
-        enqueue("transaction", "DELETE", id, null)
-        reverseDelta(old)
     }
 
     override suspend fun fetchAllAndSave(spreadsheetId: String) {
         val pendingIds = syncQueueDao.getAll().filter { it.entityType == "transaction" }.map { it.entityId }.toSet()
         val response = sheetsApi.batchGet(spreadsheetId, listOf("transactions"))
-        val remote = response.valueRanges.firstOrNull()?.values?.drop(1)
-            ?.mapNotNull { mapper.rowToTransaction(it) } ?: return
+        val values = response.valueRanges.firstOrNull()?.values
+        // No header row at all reads as an untrustworthy/transient response, not "the sheet is
+        // really empty" — proceeding would wipe every local row not in the sync queue via
+        // deleteNotIn below. A genuinely empty sheet still has its header row (values.size == 1);
+        // only the fully-empty-array case (no header either) is refused.
+        if (values.isNullOrEmpty()) return
+        val remote = values.drop(1).mapNotNull { mapper.rowToTransaction(it) }
 
         db.withTransaction {
             val toStore = remote.filter { it.id !in pendingIds }

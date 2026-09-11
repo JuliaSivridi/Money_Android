@@ -170,9 +170,12 @@ critical path.
 - [x] Overlay-stack mechanism for Settings/Help/Feedback/About — local state
       in `MainScreen`, no back-stack entries (§12)
 - [x] `MainActivity`: real auth gate (`AuthScreen` vs `MainScreen`)
-- [ ] Deep link handler — `stlermoney://` scheme registered in the manifest,
-      but `MainActivity`/`MainScreen` don't parse `onNewIntent` yet (§12
-      Deeplinks marked optional for v1 in the spec)
+- [x] Deep link handler — decided against. The `stlermoney://` intent-filter
+      was registered in the manifest with no actual handler ever written
+      (any such URI just opened the app to the auth/main gate); the user
+      confirmed this project doesn't need deep links at all, so removed the
+      dead manifest entry entirely rather than leaving it as inert config
+      (code-review finding, exported unhandled `VIEW` intent-filter).
 
 ---
 
@@ -667,3 +670,98 @@ whichever phase touches them:
 - [x] Analytics → Transactions drill-down catalog — resolved as donut-only
       (§17 resolved item 8, stale duplicate checkbox — this and that item
       described the same open question)
+
+---
+
+## Phase 13 — Code Review Fixes (2026-09-11)
+
+`docs/code-review.md` — a full read-only review (not written by this
+session). Verified its two P0 findings directly against the code before
+acting on any of it (both confirmed accurate). Automated tests were
+explicitly declined by the user across all her projects, not just this one —
+the P1 "no tests" finding itself is not being acted on; everything below is
+a code fix, not a test.
+
+**P0 — data-integrity, fixed:**
+- `SettingsViewModel.switchSpreadsheet()` didn't clear `sync_queue` before
+  switching — pending ops for the OLD spreadsheet would push against the
+  NEW one. Now clears the queue first (same as `GoogleAuthRepository.signOut()`
+  already did).
+- `TransactionRepositoryImpl` create/update/delete wrote the transaction row,
+  category refs, sync-queue enqueue, and account balance adjustment(s) as
+  separate un-atomic steps — a crash between them left `Account.balance`
+  (denormalised, never recomputed from history) silently wrong forever, and
+  `update`'s revert-then-reapply could double-apply one side. All wrapped in
+  one `db.withTransaction` now; `AccountRepositoryImpl.adjustBalance` throws
+  instead of silently no-op'ing on a missing account, rolling back the whole
+  mutation instead of dropping one side of a transfer's delta.
+
+**P1, fixed:**
+- `convertToBase` fallback chain, per explicit user direction: live rate →
+  average implied rate from the user's own last 8 same-currency transactions
+  → 1:1 only if neither exists. Existing `amountBase` values are deliberately
+  NOT recomputed when the base currency changes later — user's call, base
+  currency is chosen once.
+- `fetchAllAndSave` (Transaction/Account/Category) could wipe local data on
+  a response with no header row at all (transient/partial response, or a
+  newly-created spreadsheet whose seed write failed) — now refuses to run
+  `deleteNotIn` in that case. A genuinely empty sheet (header present, zero
+  data rows) still deletes down to empty correctly.
+- `createSpreadsheet()`: the seed `batchUpdate`'s HTTP status was never
+  checked and Room was seeded regardless of whether it succeeded; both HTTP
+  responses now use `.use {}` and a failed seed write aborts (returns `""`)
+  instead of leaving Room "seeded" against data Sheets never received.
+  `completeSignIn` now throws on a blank spreadsheetId instead of saving a
+  broken "signed in with nothing to sync against" state — surfaces as a real
+  `AuthUiState.Error` via `signIn()`'s existing `runCatching`.
+- Crash: `TransactionFormSheet` defaulted the account via
+  `accounts.first { !it.archived }` — `NoSuchElementException` if every
+  account happened to be archived. `firstOrNull { } ?: accounts.first()`.
+- OkHttp authenticator retried a 401 forever on a revoked-but-still-refreshing
+  grant — added a `responseCount` guard (bail after one retry, the standard
+  OkHttp recipe). `HttpLoggingInterceptor` was `Level.BASIC` in release too
+  (logs full request URLs, spreadsheet ids included) — debug-only now.
+
+**P2/P3, fixed (user: "if these are improvements, fix them"):**
+- `CategoryRepositoryImpl.deleteCategoryWithTransfer`'s DELETE enqueue moved
+  inside the same `withTransaction` as the row deletion (was after it — a
+  process death in between un-queued the delete, so the next pull restored
+  the "deleted" category from Sheets).
+- `SyncManager.initialize()`: `ExistingPeriodicWorkPolicy.UPDATE` →  `KEEP`
+  (spec §7) — UPDATE reset the 30-minute timer on every app open, so on a
+  phone reopened more often than that, periodic sync came due but never
+  actually fired.
+- `DatabaseModule`: removed `fallbackToDestructiveMigration` — a no-op today
+  (version 1), but a footgun for the next schema bump (silent wipe,
+  `sync_queue` included, instead of forcing a real migration). Un-gitignored
+  `app/schemas/` and committed the generated schema JSON so a future bump's
+  diff is visible in review/CI.
+- `ExchangeRateRepositoryImpl`'s `init { runBlocking { ... } }` (DataStore
+  hydration) blocked whatever thread constructs this Hilt singleton — moved
+  to a fire-and-forget coroutine on a dedicated `CoroutineScope`; `rates`/
+  `baseCurrency` just start at their defaults until it lands.
+- Removed the dead `stlermoney://` deep-link `intent-filter` (exported,
+  unhandled — `MainActivity` never parsed it) — user confirmed this project
+  doesn't need deep links at all; this was inert config, not a deferred
+  feature.
+- Removed `AccountRepository.deleteAccount()`/`AccountDao.deleteById` — dead
+  API, no UI caller (account deletion is intentionally archive-only, matching
+  the live PWA).
+- `MainScreen`'s overlay stack was a `List<String>` of magic names
+  (`"settings"`, `"help"`, …) — now a private `Overlay` enum.
+
+**Noted, not fixed (would need real feature work, not a code fix):**
+- Exhausted sync-queue items (`SyncWorker`, `MAX_RETRIES = 5`) are dropped
+  with zero user-visible signal — surfacing "N changes dropped" needs new
+  persisted state + UI wiring, not a quick fix; flagged for later.
+- `FeedbackViewModel` not extending `BaseViewModel` — looked at this and
+  decided it's not actually an inconsistency worth fixing: its `SendResult`
+  (Sending/Success/Error) state machine serves a real UI need
+  `BaseViewModel.safeLaunch`'s generic `uiError` toast doesn't provide.
+- UI/product gaps vs spec table (last-used account, category-sort-by-usage,
+  transaction list paging, time picker on create, `collapsed_account_groups`
+  local-only) — feature-shaped gaps already tracked earlier in this doc as
+  deliberate deviations or follow-up work, not re-litigated here.
+- `Double` for money, `LazyVerticalGrid`-in-scrolling-`Column` nested scroll,
+  Analytics aggregation running in composition — real but low-priority for a
+  personal-scale dataset; unchanged.
