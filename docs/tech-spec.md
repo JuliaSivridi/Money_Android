@@ -6,9 +6,9 @@
 **Min SDK:** 26 (Android 8.0) · **Target SDK:** 36
 
 > This spec is derived from two sources: the domain model and sync design of
-> [`Money-PWA-tech-spec.md`](./Money-PWA-tech-spec.md) (the web app this rewrites),
-> and the native architecture patterns of the sibling app
-> [`Tasks-Android-tech-spec.md`](./Tasks-Android-tech-spec.md) (`com.stler.tasks`,
+> **Money PWA** (the web app this rewrites, [github.com/JuliaSivridi/Money_PWA](https://github.com/JuliaSivridi/Money_PWA)),
+> and the native architecture patterns of the sibling app **Tasks Android**
+> (`com.stler.tasks`, [github.com/JuliaSivridi/Tasks_Android](https://github.com/JuliaSivridi/Tasks_Android),
 > same author, same Google Sheets-as-backend approach). Where the two disagree,
 > this document follows Tasks Android's proven native patterns, and Money PWA's
 > data/sync semantics.
@@ -242,8 +242,8 @@ disabling Accounts/Categories/Analytics, so no `FeatureFlags` data class exists.
 
 ## 5. Data Model
 
-Ported directly from Money PWA's data model ([§5](./Money-PWA-tech-spec.md#5-data-model)),
-with Kotlin types and Room column types substituted for TS/Dexie ones.
+Ported directly from Money PWA's own data model, with Kotlin types and Room
+column types substituted for TS/Dexie ones.
 
 ### 5.1 Transaction
 

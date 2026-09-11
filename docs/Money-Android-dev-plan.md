@@ -1,7 +1,7 @@
 # Stler Money Android — Development Plan
 
 Phased build order derived from
-[`Money-Android-tech-spec.md`](./Money-Android-tech-spec.md). Section
+[`tech-spec.md`](./tech-spec.md). Section
 references (`§x`) point back into that spec — read the referenced section
 before starting the task, don't implement from the checklist title alone.
 
