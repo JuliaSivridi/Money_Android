@@ -141,18 +141,31 @@ Signing via environment variables `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`,
 ### Write path (e.g. creating a transaction)
 
 1. ViewModel calls `transactionRepository.createTransaction(input)`.
-2. Repository computes `amount_base` via `convertToBase()` (needs the current
-   exchange-rate map — read from `ExchangeRateRepository`'s cached Room/DataStore
-   snapshot, never a blocking network call).
-3. Repository writes the transaction to Room (`transactionDao.upsert(entity)`).
-4. Repository calls `accountRepository.adjustBalance(accountId, delta)` — same
-   `computeBalanceDelta` table as the PWA (see [§16.1](#161-transaction-balance-delta)).
-   This is a second Room write (account balance) plus a second SyncQueue entry.
-5. Repository enqueues a `SyncQueueEntity` (INSERT) for the transaction via
-   `syncQueueDao.enqueue()`.
-6. Room `Flow` emits → all observing ViewModels recompose → UI updates
+2. ViewModel (`TransactionFormViewModel`) computes `amount_base` via
+   `convertToBase()` *before* calling the repository — needs the current
+   exchange-rate map, read from `ExchangeRateRepository`'s cached Room/
+   DataStore snapshot, never a blocking network call — see
+   [§16.5](#165-converttobaseamount-currency-basecurrency-rates-samecurrencyhistory)
+   for the fallback chain when there's no live rate.
+3. Steps 3–5 all run inside **one `db.withTransaction { }`** (code-review
+   fix — these used to be three separate, un-atomic writes; a crash between
+   them left the denormalised `Account.balance` silently wrong forever, with
+   no automatic repair, since recomputing it from transaction history is
+   explicitly forbidden — see below):
+   - Repository writes the transaction to Room (`transactionDao.upsert(entity)`).
+   - Repository enqueues a `SyncQueueEntity` (INSERT) for the transaction via
+     `syncQueueDao.enqueue()`.
+   - Repository calls `accountRepository.adjustBalance(accountId, delta)` —
+     same `computeBalanceDelta` table as the PWA (see
+     [§16.1](#161-transaction-balance-delta)); this itself does a Room write
+     (account balance) plus its own SyncQueue entry, both enlisted in the
+     same outer transaction. `adjustBalance` **throws** if the account row
+     is missing (rather than silently no-op'ing), rolling back the entire
+     mutation — a transfer to a deleted/unknown account fails loudly instead
+     of dropping the destination side's delta.
+4. Room `Flow` emits → all observing ViewModels recompose → UI updates
    immediately (offline-first, same guarantee as Tasks Android).
-7. On next sync trigger, `SyncWorker.push()` drains the queue to Sheets API.
+5. On next sync trigger, `SyncWorker.push()` drains the queue to Sheets API.
 
 **Balance side-effects must always go through `AccountRepository.adjustBalance()`.**
 Never recompute `balance` by summing transactions inline — this mirrors the PWA's
@@ -228,7 +241,7 @@ com.stler.money/
 │   ├── theme/                     Color.kt, Theme.kt, Type.kt
 │   └── util/                       EmptyState, ShimmerTransactionList, ErrorSnackbarEffect
 ├── AppContainer.kt             Manual DI container for non-Hilt singletons (if needed)
-├── MainActivity.kt             Auth gate, deep link handler
+├── MainActivity.kt             Auth gate — no deep link handler (decided against, §12)
 └── MoneyApplication.kt         Application; initializes SyncManager
 ```
 
@@ -511,6 +524,13 @@ app created or the user picked). No `calendar.readonly` / `calendar.events`
 6. If no resolution needed, `accessToken` is extracted directly.
 7. `completeSignIn(token, credential)` / `finalizeAuth(intent)` → Drive search
    for `db_money`. Found → use its ID. Not found → `createSpreadsheet(token)`.
+   `completeSignIn` requires the resulting `spreadsheetId` to be non-blank
+   before continuing (code-review fix) — a blank id means `createSpreadsheet`
+   failed (bad HTTP status, or the seed write in §6.3 step 2 failed), and
+   used to still get saved as a "signed in" state with nothing to sync
+   against: `SyncWorker` no-ops on a blank id, landing the user on a
+   silently empty `MainScreen` instead of a sign-in error. Now throws,
+   which `signIn()`'s `runCatching` turns into a real `AuthUiState.Error`.
 8. `authPreferences.saveAll()` persists `accessToken`, `tokenExpiry` (now + 1h),
    `spreadsheetId`, `spreadsheetName`, `userEmail`, `userName`, `userAvatarUrl`.
 9. `AuthUiState.SignedIn` → `MainActivity` shows `MainScreen`.
@@ -522,11 +542,20 @@ app created or the user picked). No `calendar.readonly` / `calendar.events`
 1. POST `https://sheets.googleapis.com/v4/spreadsheets` — creates spreadsheet
    with **4 named sheets**: `transactions` (0), `accounts` (1), `categories`
    (2), `settings` (3). (Money PWA has no `meta` sheet — Tasks does; do not add
-   one here.)
+   one here.) Checks the response status and closes it (`.use {}`) —
+   code-review fix, this response's body/connection previously leaked and
+   its status went unchecked on the *second* call below (this one already
+   checked status, just didn't close the response).
 2. POST `.../values:batchUpdate` — writes header rows plus full onboarding
-   seed data (§6.4).
+   seed data (§6.4). **Status now checked** (code-review fix): this call's
+   HTTP status went unchecked entirely before, so a failed seed write (403,
+   500, whatever) still fell through to step 3 as if it had succeeded —
+   Room ended up "seeded" with data Sheets never actually received. A
+   failed status here aborts and returns `""`, which step 7 of §6.2 now
+   treats as a sign-in failure rather than silently proceeding.
 3. Upserts all seed accounts/categories/transactions to Room so the app is
-   immediately usable without waiting for first sync.
+   immediately usable without waiting for first sync — only reached if
+   step 2 above actually succeeded.
 
 ### 6.4 Onboarding Seed Data
 
@@ -540,7 +569,14 @@ created it first.
 
 Identical mechanics to Tasks Android: `isExpiredSoon(expiry)` (within 300s),
 refresh via `Identity.getAuthorizationClient(context).authorize(buildAuthRequest())`,
-OkHttp `Authenticator` calls it once on 401.
+OkHttp `Authenticator` calls it once on 401 — "once" wasn't actually
+enforced (code-review fix, no `responseCount`/`priorResponse` guard): a
+revoked grant whose refresh call still "succeeds" but returns a token
+Google rejects again retried forever instead of surfacing an error. Bails
+after one retry now, the standard OkHttp recipe. Request logging
+(`HttpLoggingInterceptor`) is debug-only now too — it was `Level.BASIC` in
+release builds as well, which logs full request URLs, spreadsheet ids
+included.
 
 ### 6.6 Backup Exclusion
 
@@ -595,6 +631,13 @@ Identical to Tasks Android: `PeriodicWorkRequest` every 30 minutes
    local edits win). Prune local rows absent from remote **and** not pending
    (propagates deletions) — same `deleteNotIn(remoteIds + pendingIds)` pattern
    as Tasks Android's folder/label pruning, applied here to all three tables.
+   **Guard (code-review fix):** if the response has no header row at all
+   (`values` null or empty — a transient/partial response, or a
+   newly-created spreadsheet whose seed write failed), skip straight to
+   step 5 without touching Room. A genuinely empty sheet still has its
+   header row (`values.size == 1`) and prunes down to empty correctly; only
+   the fully-empty-array case is refused, since `deleteNotIn` would
+   otherwise wipe every local row not in the sync queue.
 5. Return `Result.success()`.
 
 On exception: `Result.retry()` for `runAttemptCount < 4`, else `Result.failure()`.
@@ -922,8 +965,11 @@ screen, does not exit app) — same convention as Tasks Android.
 Navigation section, no feature-flag switches (Money has nothing to disable):**
 
 1. **Spreadsheet** — current file name (`db_money` fallback) + "Change"
-   button → expandable Drive file picker; `switchSpreadsheet()` clears all
-   Room data and triggers sync.
+   button → expandable Drive file picker; `switchSpreadsheet()` clears
+   `sync_queue` *first* (code-review fix — a pending op for the old
+   spreadsheet used to survive the switch and get pushed against the new
+   one, silently corrupting it), then clears all Room entity data and
+   triggers sync — same order `GoogleAuthRepository.signOut()` already used.
 2. **Base currency** — segmented/select control: EUR / USD / RUB. Changing it
    calls `setBaseCurrency()` → persists to `settings!A1` → triggers
    `ExchangeRateRepository.refresh(currency)`.
@@ -1076,15 +1122,14 @@ to the tab (via the bottom nav item itself) doesn't reapply a stale filter.
 - `TransactionFormSheet` / `AccountFormSheet` / `CategoryFormSheet`
   (`ModalBottomSheet`) are local overlays, not navigation destinations.
 
-### Deeplinks (`stlermoney://`)
+### Deeplinks — decided against
 
-Optional for v1, matching Tasks Android's pattern if implemented:
-
-| URI | Action |
-|---|---|
-| `stlermoney://transaction/{id}` | Open edit form for the transaction |
-| `stlermoney://create` | Open create form |
-| `stlermoney://accounts` | Navigate to Accounts tab |
+Was "optional for v1" here; resolved. The `stlermoney://` `intent-filter`
+was registered in the manifest with no handler ever written — any such URI
+just opened the app to the auth/main gate, doing nothing else. The user
+confirmed this app doesn't need deep links at all, so the dead manifest
+entry was removed rather than left as inert, exported config (code-review
+finding). Not revisiting unless a real use case shows up.
 
 ---
 
@@ -1177,8 +1222,11 @@ computeBalanceDelta(t: Transaction):
                   else:                   { delta: +t.amount }   // received
 ```
 
-On **update**: reverse old delta, then apply new delta.
-On **delete**: reverse old delta only.
+On **update**: reverse old delta, then apply new delta — both inside the
+same `db.withTransaction` as the row write (code-review fix; these used to
+be two independent steps, so a failure between them could double-apply one
+side instead of rolling back cleanly).
+On **delete**: reverse old delta only, same transaction as the row deletion.
 
 ### 16.2 Queue deduplication (push)
 
@@ -1223,16 +1271,41 @@ formatGroupLabel(date: LocalDate):
 fun generateId(prefix: String) = "${prefix}_${UUID.randomUUID().toString().replace("-", "").take(8)}"
 ```
 
-### 16.5 `convertToBase(amount, currency, baseCurrency, rates)`
+### 16.5 `convertToBase(amount, currency, baseCurrency, rates, sameCurrencyHistory)`
+
+Three-step fallback chain (code-review finding: a blind 1:1 fallback with no
+live rate silently corrupted `amount_base` for the rest of that transaction's
+life — analytics sums `amount_base` forever, so a wrong value never
+self-corrects). `sameCurrencyHistory` defaults to empty and is only passed
+by `TransactionFormViewModel` (the one call site where getting this right
+matters) — the Analytics live-balance call sites don't bother, a stale 1:1
+in a transient display value is a lesser concern than in a permanently
+stored one.
 
 ```
 if currency == baseCurrency: return amount
-rate = rates[currency] ?: return amount   // fallback: assume 1:1
-return amount / rate
+rates[currency]?.let { return amount / it }               // 1. live rate
+
+impliedRates = sameCurrencyHistory                          // 2. average of the user's own
+  .filter { it.currency == currency && it.amountBase != 0 } //    recent real transactions in
+  .map { it.amount / it.amountBase }                         //    this currency (last 8, see
+if impliedRates.isNotEmpty():                                //    TransactionFormViewModel)
+  avgRate = impliedRates.average()
+  if avgRate is finite and nonzero: return amount / avgRate
+
+return amount   // 3. final fallback: 1:1 — no live rate AND no history yet
+                //    (e.g. the very first transaction ever in a new currency)
 ```
 
 Rates map is `{ USD: 1.08, RUB: 95.4, ... }` where each value is
-`1 baseCurrency = N foreignCurrency`; division converts foreign → base.
+`1 baseCurrency = N foreignCurrency`; division converts foreign → base. Same
+direction for the history-implied rate: a past transaction's own
+`amount / amount_base` is exactly what `rates[currency]` would have been at
+save time, by construction.
+
+Deliberately NOT revisited on a later base-currency change: existing
+`amount_base` values are left as-is when the user changes base currency in
+Settings — chosen once, by design (user's call — she's the only user today).
 
 ### 16.6 Multi-category toggle (category grid)
 
@@ -1254,12 +1327,19 @@ Index 0 = primary (analytics, donut chart). Index 1 = secondary tag only.
 ```
 deleteCategory(id, transferToId):
   txns = transactionDao.getByCategoryId(id)
-  for txn in txns:
-    newIds = txn.categoryIds
-      .map { if (it == id) transferToId else it }
-      .distinct()   // dedup — prevents double-listing if transferToId was already present
-    update(txn.copy(categoryIds = newIds)); enqueue(UPDATE, txn.id)
-  categoryDao.delete(id); enqueue(DELETE, id)
+  db.withTransaction {
+    for txn in txns:
+      newIds = txn.categoryIds
+        .map { if (it == id) transferToId else it }
+        .distinct()   // dedup — prevents double-listing if transferToId was already present
+      update(txn.copy(categoryIds = newIds)); enqueue(UPDATE, txn.id)
+    categoryDao.delete(id); enqueue(DELETE, id)   // DELETE enqueue inside the same
+  }                                                 // transaction (code-review fix) — it
+                                                     // used to happen after commit, so a
+                                                     // process death in between left the
+                                                     // category deleted locally with no
+                                                     // DELETE queued; the next pull then
+                                                     // restored it from Sheets.
 ```
 
 ---
