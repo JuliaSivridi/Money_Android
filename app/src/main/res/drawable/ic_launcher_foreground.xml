@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Foreground for the adaptive launcher icon (108×108dp) — a port of Money
+  PWA's own icon (public/icons/icon.svg: lucide-react's "Wallet" glyph,
+  stroke white, on an #E07E38 rounded-square background), not a hand-drawn
+  approximation. The <group> translate keeps the glyph's own bounding-box
+  center (12.5,12 in its local coordinates) mapped to this canvas's center
+  (54,54) at any scale. First attempt reused the source SVG's own scale
+  ratio directly (glyph ≈75% of canvas width, matching the PWA icon, which
+  is declared `"purpose": "any maskable"` and so already safe-zoned for a
+  circular crop) — that undersells how much *more* some real launchers
+  (MIUI confirmed, via user screenshot) zoom an adaptive icon's foreground
+  layer beyond the maskable-web-icon convention: the wallet nearly touched
+  the icon's rounded-square edge on-device, unlike the same SVG on the web.
+  Scaled down further here (glyph ≈46% of canvas width) for real margin
+  under that extra zoom, rather than just the bare Android safe-zone minimum.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <group
+        android:pivotX="0"
+        android:pivotY="0"
+        android:scaleX="2.6"
+        android:scaleY="2.6"
+        android:translateX="54"
+        android:translateY="54">
+        <group
+            android:translateX="-12.5"
+            android:translateY="-12">
+            <path
+                android:pathData="M21,12 V7 H5 a2,2 0 0,1 0,-4 h14 v4"
+                android:fillColor="#00000000"
+                android:strokeColor="#FFFFFF"
+                android:strokeWidth="1.5"
+                android:strokeLineCap="round"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M3,5 v14 a2,2 0 0,0 2,2 h16 v-5"
+                android:fillColor="#00000000"
+                android:strokeColor="#FFFFFF"
+                android:strokeWidth="1.5"
+                android:strokeLineCap="round"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M18,12 a2,2 0 0,0 0,4 h4 v-4 Z"
+                android:fillColor="#00000000"
+                android:strokeColor="#FFFFFF"
+                android:strokeWidth="1.5"
+                android:strokeLineCap="round"
+                android:strokeLineJoin="round" />
+        </group>
+    </group>
+</vector>

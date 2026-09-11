@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Web OAuth 2.0 Client ID from Google Cloud Console.
+        Go to https://console.cloud.google.com/apis/credentials
+        Create a "Web application" client (needed even for Android-only apps
+        so CredentialManager can issue a Google ID token) in a project that has
+        the Google Sheets API and Google Drive API enabled — see tech spec §15.
+        Paste the client ID here (format: XXXXXXXX.apps.googleusercontent.com).
+
+        TODO: replace this placeholder before sign-in will work.
+    -->
+    <string name="google_web_client_id">775941331656-bkq8os2sd4vjde6htmrjp3tr68scrgd8.apps.googleusercontent.com</string>
+</resources>
