@@ -39,6 +39,7 @@
 15. [First-Time Setup (New Developer)](#15-first-time-setup-new-developer)
 16. [Key Algorithms](#16-key-algorithms)
 17. [Design Decisions & Remaining Open Items](#17-design-decisions--remaining-open-items)
+18. [Transaction Drafts (notification-derived)](#18-transaction-drafts-notification-derived)
 
 ---
 
@@ -201,7 +202,8 @@ com.stler.money/
 ├── auth/                     GoogleAuthRepository, AuthPreferences (DataStore), AuthData
 ├── data/
 │   ├── local/
-│   │   ├── dao/              TransactionDao, AccountDao, CategoryDao, SyncQueueDao
+│   │   ├── dao/              TransactionDao, AccountDao, CategoryDao, SyncQueueDao,
+│   │   │                      TransactionDraftDao
 │   │   ├── entity/            Room entities + toDomain() / toEntity() mappers
 │   │   └── MoneyDatabase.kt   RoomDatabase, migration objects
 │   ├── remote/
@@ -214,11 +216,17 @@ com.stler.money/
 │       ├── TransactionRepository.kt / Impl.kt   Mutations + balance side-effects + pull
 │       ├── AccountRepository.kt / Impl.kt       CRUD + adjustBalance
 │       ├── CategoryRepository.kt / Impl.kt      CRUD + reorder + deleteWithTransfer
-│       └── ExchangeRateRepository.kt / Impl.kt  fetch + cache rates
+│       ├── ExchangeRateRepository.kt / Impl.kt  fetch + cache rates
+│       └── TransactionDraftRepository.kt / Impl.kt  local-only draft CRUD + dedup (§18)
 ├── di/
-│   ├── DatabaseModule.kt      Room, all DAOs
+│   ├── DatabaseModule.kt      Room, all DAOs, migrations
 │   └── NetworkModule.kt       OkHttpClient, Retrofit, SheetsApi, Gson
-├── domain/model/               Transaction, Account, Category, DebtSummary, SyncState
+├── domain/model/               Transaction, Account, Category, DebtSummary, SyncState,
+│                                TransactionDraft
+├── notifications/               NotificationParser (Strategy), NotificationParserRegistry
+│   │                              (whitelist), MoneyNotificationListenerService,
+│   │                              MoneyAmountExtractor — see §18
+│   └── parsers/                  GooglePayParser, one per whitelisted source
 ├── sync/
 │   ├── SyncState.kt            Sealed class: Idle / Syncing / Pending(count)
 │   ├── SyncManager.kt          WorkManager scheduling + syncState Flow
@@ -341,9 +349,12 @@ position) and deduplicated. See [§16.7](#167-category-delete-with-transfer).
 
 ### 5.6 Room Database
 
-**Database name:** `money.db` · **Room version:** 1 (greenfield — no legacy
-Dexie migration baggage to replicate; Money PWA's `MoneyDB` → `MoneyDB2`
-migration history does not need porting).
+**Database name:** `money.db` · **Room version:** 2 (bumped from 1 to add
+`transaction_drafts`, §18 — greenfield otherwise, no legacy Dexie migration
+baggage to replicate; Money PWA's `MoneyDB` → `MoneyDB2` migration history
+does not need porting). `fallbackToDestructiveMigration` is intentionally
+absent (see code review Phase 13 fix) — every version bump needs a real
+`Migration`, or the app crashes loudly instead of silently wiping the DB.
 
 #### Table: `transactions`
 
@@ -429,6 +440,25 @@ comma string itself is only read/written at the Sheets-mapping boundary.
 | payloadJson | TEXT NOT NULL | |
 | createdAt | TEXT NOT NULL | |
 | retryCount | INTEGER NOT NULL | Default 0 |
+
+#### Table: `transaction_drafts` (added in Room version 2 — see §18)
+
+| Column | SQLite Type | Notes |
+|---|---|---|
+| id | TEXT NOT NULL PRIMARY KEY | |
+| sourcePackage | TEXT NOT NULL | e.g. `com.google.android.apps.walletnfcrel` |
+| sourceLabel | TEXT NOT NULL | e.g. `"Google Pay"` — shown as the "bank" |
+| notificationKey | TEXT NOT NULL | `StatusBarNotification.key` — primary dedup key |
+| textHash | TEXT NOT NULL | SHA-256 of title+text — fallback dedup key |
+| amount | REAL NOT NULL | |
+| currency | TEXT NOT NULL | |
+| date | TEXT NOT NULL | from the notification's post time |
+| createdAt | TEXT NOT NULL | insertion time — anchors the dedup window |
+
+No status column and **not part of `sync_queue`** — a row here IS the
+pending state; confirming (real Save) or dismissing (Delete) just deletes
+the row. Never synced to Sheets directly; only the real `Transaction`
+created when a draft is confirmed goes through the normal write path.
 
 ### 5.7 Google Sheets Schema
 
@@ -744,6 +774,15 @@ index is within 5 of the list end).
 transaction" text button.
 **FAB:** opens `TransactionFormSheet` in create mode.
 
+**Draft rows (§18):** pending `TransactionDraft`s are merged into this same
+`LazyColumn`, grouped by date exactly like real transactions — no separate
+screen. A `DraftsButton` next to the filter icon in `MoneyTopAppBar` (shown
+only when there's at least one pending draft) toggles the list to show only
+drafts; this is purely a display toggle on already-fetched data, unrelated
+to `TransactionFilterState`/`FilterMenu`, which stays scoped to real,
+persisted transactions. Tapping a draft row opens `TransactionFormSheet`
+pre-filled from it (see §18).
+
 ---
 
 ### 8.2 AccountsScreen
@@ -973,6 +1012,15 @@ Navigation section, no feature-flag switches (Money has nothing to disable):**
 2. **Base currency** — segmented/select control: EUR / USD / RUB. Changing it
    calls `setBaseCurrency()` → persists to `settings!A1` → triggers
    `ExchangeRateRepository.refresh(currency)`.
+3. **Bank notifications** (§18) — status text
+   (`NotificationManagerCompat.getEnabledListenerPackages` contains this
+   app's package?) + a button opening
+   `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`; rechecked on `ON_RESUME`
+   since the grant/revoke happens outside this screen. Debug builds only:
+   an extra "Add test draft" button that calls
+   `TransactionDraftRepository.insertIfNotDuplicate` directly with fixed
+   test data, bypassing the notification listener entirely — the intended
+   way to exercise the drafts UI without a real notification.
 
 ---
 
@@ -1435,3 +1483,111 @@ genuinely open.
 
 _None remaining from this list — the accessibility pass (dev plan Phase 10)
 is scheduled after `FilterMenu`, not a design decision._
+
+---
+
+## 18. Transaction Drafts (notification-derived)
+
+New in `feature/notification-drafts` (not yet merged to `main`). A warm-up
+feature exercising `NotificationListenerService`, a technique new to this
+project. Suggests transaction drafts from bank/payment app notifications;
+the user always confirms manually — nothing is written to Sheets
+automatically.
+
+**Scope decisions from the user:** no tests (project-wide convention); no
+merchant/payee parsing (the app never stores that for real transactions
+either); drafts shown inline in the existing Transactions list, not a
+separate screen; a draft is confirmed only by an actual `Save` in the form,
+never just by opening it.
+
+### 18.1 Data — local only, never synced
+
+`transaction_drafts` (§5.6) is a plain, un-synced Room table — no row in it
+ever reaches `sync_queue` or Sheets. A row IS the pending state: there's no
+status column, confirming (real Save) or dismissing (Delete) just deletes
+the row. Not cleared by `switchSpreadsheet()` — drafts are local captures
+from the phone, not data belonging to a specific spreadsheet.
+
+`TransactionDraftRepository.insertIfNotDuplicate(parsed: ParsedDraft): Boolean`
+dedups before inserting: primary key is `notificationKey` (Android reuses
+the same `StatusBarNotification.key` when a notification is updated in
+place, e.g. a bank correcting an amount seconds after posting); fallback
+is `textHash` (SHA-256 of raw title+text), for the rarer case where the
+source posts a fresh key for what's really the same event. Both are scoped
+to a 5-minute window anchored on `createdAt`, so an old, long-since-handled
+draft with a coincidentally matching hash can't suppress a genuinely new one.
+
+### 18.2 Capture — `notifications/` package
+
+`NotificationParser` is a Strategy interface — one implementation per
+whitelisted source, registered in `NotificationParserRegistry` (a plain
+list, not Hilt multibinding — one parser doesn't justify that machinery
+yet). `MoneyNotificationListenerService` (`@AndroidEntryPoint`, field
+injection like `MainActivity`, since the OS instantiates it directly)
+filters `onNotificationPosted` by `NotificationParserRegistry.forPackage`,
+reads `EXTRA_TITLE`/`EXTRA_TEXT`, and **unconditionally logs the raw
+title+text** (tag `MoneyNotificationListener`) before attempting to parse —
+this is both the "log and skip on failure" requirement and, deliberately,
+the mechanism for capturing a real sample later (see §18.5).
+
+Since merchant is never parsed, `MoneyAmountExtractor` (shared across all
+parsers) only has to locate a money amount+currency anywhere in the
+combined title+text — symbol-then-number, number-then-symbol, code-then-
+number, number-then-code, handling both `1,234.56` and `1.234,56` grouping.
+This sidesteps almost all of the source-specific-phrasing risk a "parse the
+whole sentence" approach would carry.
+
+**`GooglePayParser`** — `packageName = "com.google.android.apps.walletnfcrel"`
+(Google Wallet/Pay, confirmed exact by the user), `sourceLabel = "Google Pay"`.
+No real notification sample was available while writing this — see §18.5.
+`sourceLabel` is a static per-parser string, **not** the underlying bank/
+card that was actually charged; Google Wallet aggregates multiple cards,
+and extracting which one was used would require that information to
+actually be present in the notification text, which is unknown without a
+real sample.
+
+### 18.3 Access — SettingsScreen card
+
+No separate screen: a card in the existing `SettingsScreen` (§8.6) shows
+whether access is granted (`NotificationManagerCompat
+.getEnabledListenerPackages` contains this app's package) and a button to
+`Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`. Rechecked on `ON_RESUME`
+since granting/revoking happens outside this screen, in system settings.
+
+### 18.4 Confirming a draft — reuses `copyFrom`, not a parallel prefill path
+
+Opening a draft calls `TransactionFormSheet` with a new `draftId: String?`
+parameter and `copyFrom = draft.toPrefillTransaction(suggestedCategoryId)`
+(`domain/model/TransactionDraft.kt`) — reusing the existing Copy-flow
+prefill mechanism rather than adding a second one:
+
+- **Date** is carried over for a draft (unlike a plain Copy, which
+  deliberately does not — see §10) since the notification's own date is
+  meaningful information the user asked to see prefilled.
+- **Suggested category:** `TransactionsViewModel` computes
+  `suggestedCategoryId` — the most-used *primary* category over the
+  trailing month — from the same `transactions` flow already in its
+  `combine()`. The identical value both (a) renders as the dimmed
+  icon/name on the draft's row in the list and (b) prefills `categoryIds`
+  when the form opens, so what's shown always matches what gets prefilled.
+  Falls back to a neutral "Uncategorized" look when there's no recent
+  categorized history (e.g. a fresh install).
+- **Delete button**, only shown when `draftId != null` and no `isEdit`
+  (no Copy button in that case — nothing to copy from yet): discards the
+  draft, does not touch the balance (it never touched it).
+- **Save/Create**: `TransactionFormViewModel.save(transaction, isEdit,
+  onDone, draftId)` creates the real transaction through the normal path
+  and *only then* deletes the draft — confirmation happens on actual save,
+  never just by opening the form.
+- **Cancel**: unchanged, calls `onDismiss` directly — the draft is left
+  untouched and reappears in the pending list.
+
+### 18.5 Getting a real Google Pay notification sample
+
+No real sample was available while writing this feature. Once one comes
+through on-device, check Logcat for tag `MoneyNotificationListener` — it
+logs raw title/text for every notification from the whitelisted package,
+parse success or not — and use it to tighten `GooglePayParser`. Any
+notification from that package exercises the listener path, not
+necessarily a real payment (e.g. a card-added or weekly-summary
+notification); the parser then either extracts an amount or logs and skips.

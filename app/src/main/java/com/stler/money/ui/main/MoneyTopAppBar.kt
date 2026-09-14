@@ -6,11 +6,13 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Badge
@@ -102,6 +104,34 @@ private fun FilterButton(active: Boolean, onClick: () -> Unit) {
     }
 }
 
+/**
+ * Toggles "show only drafts" in TransactionsScreen's merged list — next to the filter
+ * button per Julia's request, deliberately separate from it (filters real DB transactions;
+ * this just switches which already-fetched items are rendered). Only ever shown when
+ * there's at least one pending draft.
+ */
+@Composable
+private fun DraftsButton(count: Int, active: Boolean, onClick: () -> Unit) {
+    val badge: @Composable BoxScope.() -> Unit = {
+        Badge(containerColor = Color.Transparent, contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant) {
+            Text("$count", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    if (active) {
+        FilledIconButton(onClick = onClick) {
+            BadgedBox(badge = badge) {
+                Icon(Icons.Outlined.Inbox, contentDescription = "Drafts — $count")
+            }
+        }
+    } else {
+        IconButton(onClick = onClick) {
+            BadgedBox(badge = badge) {
+                Icon(Icons.Outlined.Inbox, contentDescription = "Drafts — $count", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MoneyTopAppBar(
@@ -112,6 +142,9 @@ fun MoneyTopAppBar(
     onSyncClick: () -> Unit,
     filterActive: Boolean = false,
     onFilterClick: (() -> Unit)? = null,
+    draftsCount: Int = 0,
+    showDraftsOnly: Boolean = false,
+    onToggleDraftsOnly: (() -> Unit)? = null,
 ) {
     TopAppBar(
         title = { Text(title) },
@@ -123,6 +156,9 @@ fun MoneyTopAppBar(
             }
         },
         actions = {
+            if (onToggleDraftsOnly != null && draftsCount > 0) {
+                DraftsButton(count = draftsCount, active = showDraftsOnly, onClick = onToggleDraftsOnly)
+            }
             if (onFilterClick != null) {
                 FilterButton(active = filterActive, onClick = onFilterClick)
             }

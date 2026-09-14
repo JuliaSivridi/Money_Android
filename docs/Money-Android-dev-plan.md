@@ -765,3 +765,56 @@ a code fix, not a test.
 - `Double` for money, `LazyVerticalGrid`-in-scrolling-`Column` nested scroll,
   Analytics aggregation running in composition — real but low-priority for a
   personal-scale dataset; unchanged.
+
+## Phase 14 — Notification-Derived Transaction Drafts (branch `feature/notification-drafts`)
+
+Warm-up feature, not merged to `main` yet. Full design in tech spec §18 —
+this entry just tracks what shipped and what's still open.
+
+**Shipped:**
+- `transaction_drafts` Room table (version 1→2, real `Migration`, no
+  `fallbackToDestructiveMigration` to fall back on — see Phase 13) +
+  `TransactionDraftDao`/`Repository`/`Impl`, fully local, never touches
+  `sync_queue` or Sheets, not cleared on `switchSpreadsheet()`.
+- `notifications/` package: `NotificationParser` (Strategy) +
+  `NotificationParserRegistry` (plain list whitelist) + `MoneyAmountExtractor`
+  (shared amount/currency extraction — the only real cross-source parsing
+  logic, since merchant is never captured) + `MoneyNotificationListenerService`
+  (`@AndroidEntryPoint`, field-injected like `MainActivity`) +
+  `parsers/GooglePayParser` (`com.google.android.apps.walletnfcrel`).
+- `SettingsScreen` "Bank notifications" card: grant/manage-access button
+  (`Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`), rechecked on
+  `ON_RESUME`; debug-only "Add test draft" button
+  (`TransactionDraftRepository.insertIfNotDuplicate` direct call) so the
+  drafts UI is testable without a real notification or a working parser.
+- Drafts merged into `TransactionsScreen`'s existing date-grouped list per
+  Julia's explicit request (not a separate screen) — dimmed icon/category
+  hint (most-used category over the trailing month, computed in
+  `TransactionsViewModel`, shared between the row hint and the form
+  prefill), full-brightness amount + source label. `DraftsButton` (badge =
+  pending count) next to the filter icon in `MoneyTopAppBar` toggles a
+  drafts-only view of the same list; deliberately not part of
+  `TransactionFilterState`/`FilterMenu`, which stays scoped to real
+  transactions.
+- Confirming a draft reuses `TransactionFormSheet`'s existing `copyFrom`
+  prefill path (`draft.toPrefillTransaction(suggestedCategoryId)`) instead
+  of a parallel one — new `draftId` param carries the date over (unlike a
+  plain Copy) and repurposes the Delete button (discard draft, no Copy
+  button). Per the user's explicit choice, the draft is only deleted after
+  a real `Save` (`TransactionFormViewModel.save(..., draftId)`), never on
+  Cancel or just by opening the form.
+
+**Open / follow-up, not blocking this branch:**
+- `GooglePayParser`'s amount-extraction is best-effort — no real Google
+  Wallet notification sample was available while writing it. Every
+  notification from the whitelisted package logs raw title+text
+  unconditionally (tag `MoneyNotificationListener`) specifically so a real
+  sample can be captured from Logcat and used to tighten it; separate
+  small follow-up once one is seen.
+- `sourceLabel` ("Google Pay") is a static per-parser string, not the
+  actual underlying bank/card charged — Google Wallet aggregates multiple
+  cards. Extracting the real one (if even present in the notification
+  text) is part of the same follow-up above, not solvable without a
+  sample.
+- Not yet merged to `main` — stays on `feature/notification-drafts` until
+  stable, per the user's explicit branching request.

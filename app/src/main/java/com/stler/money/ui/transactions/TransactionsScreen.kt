@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Redo
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Wallet
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -37,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stler.money.domain.model.Account
 import com.stler.money.domain.model.Category
 import com.stler.money.domain.model.Transaction
+import com.stler.money.domain.model.TransactionDraft
 import com.stler.money.domain.model.TransactionType
 import com.stler.money.ui.icons.CategoryIconView
 import com.stler.money.ui.theme.DebtBorrowedColor
@@ -64,20 +66,38 @@ import java.util.Locale
  * follow-up work; the FAB lives in MainScreen's Scaffold, this screen just
  * exposes [onTransactionClick] for row taps (opens edit mode).
  */
+/** One row of the merged transactions+drafts list — see `TransactionsScreen`'s `entries`. */
+private sealed interface TransactionListEntry {
+    val date: String
+    data class Real(val txn: Transaction) : TransactionListEntry {
+        override val date get() = txn.date
+    }
+    data class Draft(val draft: TransactionDraft) : TransactionListEntry {
+        override val date get() = draft.date
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransactionsScreen(
     onTransactionClick: (Transaction) -> Unit = {},
+    onDraftClick: (TransactionDraft) -> Unit = {},
     viewModel: TransactionsViewModel = hiltViewModel(),
 ) {
     ErrorSnackbarEffect(viewModel)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val grouped = state.transactions.groupBy { it.date }.toSortedMap(compareByDescending { it })
+    val showDraftsOnly by viewModel.showDraftsOnly.collectAsStateWithLifecycle()
+    val suggestedCategory = state.suggestedCategoryId?.let { state.categoriesById[it] }
+
+    val entries: List<TransactionListEntry> =
+        (if (showDraftsOnly) emptyList() else state.transactions.map { TransactionListEntry.Real(it) }) +
+            state.drafts.map { TransactionListEntry.Draft(it) }
+    val grouped = entries.groupBy { it.date }.toSortedMap(compareByDescending { it })
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (state.transactions.isEmpty() && state.isLoading) {
+        if (entries.isEmpty() && state.isLoading) {
             ShimmerListPlaceholder(modifier = Modifier.fillMaxSize())
-        } else if (state.transactions.isEmpty()) {
+        } else if (entries.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
@@ -86,12 +106,12 @@ fun TransactionsScreen(
                         modifier = Modifier.padding(bottom = 8.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
                     )
-                    Text("No transactions yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (showDraftsOnly) "No drafts" else "No transactions yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                grouped.forEach { (date, txns) ->
+                grouped.forEach { (date, dayEntries) ->
                     item {
                         // Same size/weight/color as Tasks Android's Upcoming `DayHeader`
                         // (bodyMedium + Medium + onSurface, not the muted labelMedium
@@ -106,17 +126,69 @@ fun TransactionsScreen(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
-                    items(txns) { txn ->
-                        TransactionRow(
-                            txn = txn,
-                            account = state.accountsById[txn.accountId],
-                            toAccount = state.accountsById[txn.toAccountId],
-                            categories = txn.categoryIds.mapNotNull { state.categoriesById[it] },
-                            onClick = { onTransactionClick(txn) },
-                        )
+                    items(dayEntries) { entry ->
+                        when (entry) {
+                            is TransactionListEntry.Real -> TransactionRow(
+                                txn = entry.txn,
+                                account = state.accountsById[entry.txn.accountId],
+                                toAccount = state.accountsById[entry.txn.toAccountId],
+                                categories = entry.txn.categoryIds.mapNotNull { state.categoriesById[it] },
+                                onClick = { onTransactionClick(entry.txn) },
+                            )
+                            is TransactionListEntry.Draft -> DraftRow(
+                                draft = entry.draft,
+                                suggestedCategory = suggestedCategory,
+                                onClick = { onDraftClick(entry.draft) },
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * A pending notification-derived draft, mixed into the same list as real transactions
+ * (per Julia's request — not a separate screen). Icon/category name are dimmed (there is
+ * no confirmed category yet, just a best-guess suggestion); amount and source ("bank")
+ * stay full-brightness, same as a real row.
+ */
+@Composable
+private fun DraftRow(draft: TransactionDraft, suggestedCategory: Category?, onClick: () -> Unit) {
+    val containerSize = IconSizes.lg + 12.dp
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (suggestedCategory != null) {
+            CategoryIconView(
+                iconName = suggestedCategory.icon,
+                color = (categoryColorOf(suggestedCategory) ?: Color.Gray).copy(alpha = 0.35f),
+                size = IconSizes.lg,
+            )
+        } else {
+            Box(
+                modifier = Modifier.size(containerSize).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Outlined.HourglassEmpty,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+            Text(
+                text = suggestedCategory?.name ?: "Uncategorized",
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(formatAmount(draft.amount, draft.currency), style = MaterialTheme.typography.bodyLarge)
+            Text(draft.sourceLabel, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

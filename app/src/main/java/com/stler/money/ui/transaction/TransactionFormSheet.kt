@@ -100,6 +100,10 @@ fun TransactionFormSheet(
     /** Pre-fills the form as a new (non-edit) transaction — the "Copy" flow below. */
     copyFrom: Transaction? = null,
     initialAccountId: String? = null,
+    /** Set when [copyFrom] is a draft's prefill (see MainScreen.openDraftForm) — repurposes
+     * the Delete button to discard the draft instead of an existing transaction, and (unlike
+     * a plain Copy) carries the draft's date over into the form. */
+    draftId: String? = null,
     onDismiss: () -> Unit,
     onCopy: (Transaction) -> Unit = {},
     viewModel: TransactionFormViewModel = hiltViewModel(),
@@ -118,9 +122,11 @@ fun TransactionFormSheet(
     // a plain unkeyed remember would keep showing X's stale edit-mode values.
     var type by remember(transaction, copyFrom) { mutableStateOf(source?.type ?: TransactionType.EXPENSE) }
     var date by remember(transaction, copyFrom) {
-        // Editing keeps the original date; a fresh create or a copy both default to today
-        // (copyFrom explicitly does NOT carry over the source's date — matches the PWA).
-        mutableStateOf(if (transaction != null) source?.date ?: LocalDate.now().toString() else LocalDate.now().toString())
+        // Editing keeps the original date, as does a draft's prefill (the notification's own
+        // date is meaningful — matches Julia's request); a fresh create or a plain Copy both
+        // default to today (copyFrom explicitly does NOT carry over the source's date there —
+        // matches the PWA).
+        mutableStateOf(if (transaction != null || draftId != null) source?.date ?: LocalDate.now().toString() else LocalDate.now().toString())
     }
     var amountStr by remember(transaction, copyFrom) { mutableStateOf(source?.amount?.let { formatForInput(it) } ?: "") }
     var accountId by remember(transaction, copyFrom) { mutableStateOf(source?.accountId ?: initialAccountId ?: "") }
@@ -322,8 +328,8 @@ fun TransactionFormSheet(
             )
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                if (isEdit) {
-                    Row {
+                when {
+                    isEdit -> Row {
                         TextButton(onClick = { showDeleteConfirm = true }) {
                             Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                             Spacer(Modifier.size(4.dp))
@@ -335,14 +341,21 @@ fun TransactionFormSheet(
                             Text("Copy")
                         }
                     }
-                } else {
-                    Spacer(Modifier.size(1.dp))
+                    // Confirming a draft — Delete discards the draft; no Copy (nothing to copy from yet).
+                    draftId != null -> Row {
+                        TextButton(onClick = { showDeleteConfirm = true }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.size(4.dp))
+                            Text("Delete", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    else -> Spacer(Modifier.size(1.dp))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     TextButton(
                         enabled = canSave,
-                        onClick = { viewModel.save(buildResult(), isEdit, onDismiss) },
+                        onClick = { viewModel.save(buildResult(), isEdit, onDismiss, draftId = draftId) },
                     ) {
                         Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
@@ -353,15 +366,21 @@ fun TransactionFormSheet(
         }
     }
 
-    if (showDeleteConfirm && transaction != null) {
+    if (showDeleteConfirm && (transaction != null || draftId != null)) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete transaction?") },
-            text = { Text("This will reverse the balance change.") },
+            title = { Text(if (transaction != null) "Delete transaction?" else "Discard this draft?") },
+            text = {
+                Text(
+                    if (transaction != null) "This will reverse the balance change."
+                    else "It won't be suggested again — the notification it came from is gone.",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showDeleteConfirm = false
-                    viewModel.delete(transaction.id, onDismiss)
+                    if (transaction != null) viewModel.delete(transaction.id, onDismiss)
+                    else viewModel.deleteDraft(draftId!!, onDismiss)
                 }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") } },

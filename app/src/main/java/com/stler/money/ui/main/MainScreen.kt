@@ -41,6 +41,8 @@ import coil.compose.AsyncImage
 import com.stler.money.domain.model.Account
 import com.stler.money.domain.model.Category
 import com.stler.money.domain.model.Transaction
+import com.stler.money.domain.model.TransactionDraft
+import com.stler.money.domain.model.toPrefillTransaction
 import com.stler.money.ui.accounts.AccountFormSheet
 import com.stler.money.ui.accounts.AccountsScreen
 import com.stler.money.ui.analytics.AnalyticsScreen
@@ -83,9 +85,16 @@ fun MainScreen(
     var showTransactionForm by remember { mutableStateOf(false) }
     var editingTransaction by remember { mutableStateOf<Transaction?>(null) }
     var copyFromTransaction by remember { mutableStateOf<Transaction?>(null) }
-    fun openCreateTransaction() { editingTransaction = null; copyFromTransaction = null; showTransactionForm = true }
-    fun openEditTransaction(t: Transaction) { editingTransaction = t; copyFromTransaction = null; showTransactionForm = true }
-    fun openCopyTransaction(t: Transaction) { editingTransaction = null; copyFromTransaction = t }
+    var confirmingDraftId by remember { mutableStateOf<String?>(null) }
+    fun openCreateTransaction() { editingTransaction = null; copyFromTransaction = null; confirmingDraftId = null; showTransactionForm = true }
+    fun openEditTransaction(t: Transaction) { editingTransaction = t; copyFromTransaction = null; confirmingDraftId = null; showTransactionForm = true }
+    fun openCopyTransaction(t: Transaction) { editingTransaction = null; copyFromTransaction = t; confirmingDraftId = null }
+    fun openDraftForm(draft: TransactionDraft, suggestedCategoryId: String?) {
+        editingTransaction = null
+        copyFromTransaction = draft.toPrefillTransaction(suggestedCategoryId)
+        confirmingDraftId = draft.id
+        showTransactionForm = true
+    }
 
     var showAccountForm by remember { mutableStateOf(false) }
     var editingAccount by remember { mutableStateOf<Account?>(null) }
@@ -117,17 +126,24 @@ fun MainScreen(
     val filterAccounts: List<Account>
     val filterCategories: List<Category>
     val filterSearch: String
+    val showDraftsOnly: Boolean
+    val suggestedCategoryId: String?
     if (transactionsViewModel != null) {
         filterState = transactionsViewModel.filterState.collectAsStateWithLifecycle().value
         filterAccounts = transactionsViewModel.accounts.collectAsStateWithLifecycle().value
         filterCategories = transactionsViewModel.categories.collectAsStateWithLifecycle().value
         filterSearch = transactionsViewModel.search.collectAsStateWithLifecycle().value
+        showDraftsOnly = transactionsViewModel.showDraftsOnly.collectAsStateWithLifecycle().value
+        suggestedCategoryId = transactionsViewModel.uiState.collectAsStateWithLifecycle().value.suggestedCategoryId
     } else {
         filterState = TransactionFilterState()
         filterAccounts = emptyList()
         filterCategories = emptyList()
         filterSearch = ""
+        showDraftsOnly = false
+        suggestedCategoryId = null
     }
+    val draftsCount by viewModel.draftsCount.collectAsStateWithLifecycle()
 
     val screenTitle = when (currentRoute) {
         Screen.ACCOUNTS -> "Accounts"
@@ -177,6 +193,9 @@ fun MainScreen(
                     onSyncClick = viewModel::triggerSync,
                     filterActive = filterState.isActive,
                     onFilterClick = if (isTransactionsRoute) { { showFilterMenu = true } } else null,
+                    draftsCount = if (isTransactionsRoute) draftsCount else 0,
+                    showDraftsOnly = showDraftsOnly,
+                    onToggleDraftsOnly = if (isTransactionsRoute) transactionsViewModel?.let { vm -> { vm.toggleDraftsOnly() } } else null,
                 )
             },
             snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -266,7 +285,10 @@ fun MainScreen(
                         navArgument(Screen.ARG_DATE_TO) { type = NavType.StringType; nullable = true; defaultValue = null },
                     ),
                 ) {
-                    TransactionsScreen(onTransactionClick = { openEditTransaction(it) })
+                    TransactionsScreen(
+                        onTransactionClick = { openEditTransaction(it) },
+                        onDraftClick = { draft -> openDraftForm(draft, suggestedCategoryId) },
+                    )
                 }
                 composable(Screen.ACCOUNTS) {
                     AccountsScreen(
@@ -319,7 +341,8 @@ fun MainScreen(
         TransactionFormSheet(
             transaction = editingTransaction,
             copyFrom = copyFromTransaction,
-            onDismiss = { showTransactionForm = false; editingTransaction = null; copyFromTransaction = null },
+            draftId = confirmingDraftId,
+            onDismiss = { showTransactionForm = false; editingTransaction = null; copyFromTransaction = null; confirmingDraftId = null },
             onCopy = { openCopyTransaction(it) },
         )
     }

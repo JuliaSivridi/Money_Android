@@ -6,6 +6,8 @@ import com.stler.money.data.repository.CategoryRepository
 import com.stler.money.data.repository.CategoryRepositoryImpl
 import com.stler.money.data.repository.ExchangeRateRepository
 import com.stler.money.data.repository.ExchangeRateRepositoryImpl
+import com.stler.money.data.repository.TransactionDraftRepository
+import com.stler.money.data.repository.TransactionDraftRepositoryImpl
 import com.stler.money.data.repository.TransactionRepository
 import com.stler.money.data.repository.TransactionRepositoryImpl
 import dagger.Binds
@@ -33,4 +35,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindExchangeRateRepository(impl: ExchangeRateRepositoryImpl): ExchangeRateRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindTransactionDraftRepository(impl: TransactionDraftRepositoryImpl): TransactionDraftRepository
 }

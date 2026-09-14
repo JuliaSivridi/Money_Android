@@ -4,6 +4,7 @@ import androidx.lifecycle.viewModelScope
 import com.stler.money.data.repository.AccountRepository
 import com.stler.money.data.repository.CategoryRepository
 import com.stler.money.data.repository.ExchangeRateRepository
+import com.stler.money.data.repository.TransactionDraftRepository
 import com.stler.money.data.repository.TransactionRepository
 import com.stler.money.data.repository.convertToBase
 import com.stler.money.domain.model.Transaction
@@ -25,6 +26,7 @@ class TransactionFormViewModel @Inject constructor(
     accountRepository: AccountRepository,
     categoryRepository: CategoryRepository,
     private val exchangeRateRepository: ExchangeRateRepository,
+    private val draftRepository: TransactionDraftRepository,
 ) : BaseViewModel() {
 
     val accounts = accountRepository.observeAll()
@@ -33,9 +35,17 @@ class TransactionFormViewModel @Inject constructor(
     val categories = categoryRepository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun save(transaction: Transaction, isEdit: Boolean, onDone: () -> Unit) = safeLaunch {
+    /** [draftId], when set, means this save confirms a draft — the draft is only deleted
+     * once the real transaction is actually created, never on Cancel (see TransactionFormSheet). */
+    fun save(transaction: Transaction, isEdit: Boolean, onDone: () -> Unit, draftId: String? = null) = safeLaunch {
         val withBase = transaction.copy(amountBase = computeAmountBase(transaction.amount, transaction.currency))
         if (isEdit) transactionRepository.updateTransaction(withBase) else transactionRepository.createTransaction(withBase)
+        if (draftId != null) draftRepository.deleteById(draftId)
+        onDone()
+    }
+
+    fun deleteDraft(id: String, onDone: () -> Unit) = safeLaunch {
+        draftRepository.deleteById(id)
         onDone()
     }
 

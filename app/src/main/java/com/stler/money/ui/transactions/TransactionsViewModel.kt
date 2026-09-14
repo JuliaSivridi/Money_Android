@@ -4,10 +4,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.stler.money.data.repository.AccountRepository
 import com.stler.money.data.repository.CategoryRepository
+import com.stler.money.data.repository.TransactionDraftRepository
 import com.stler.money.data.repository.TransactionRepository
 import com.stler.money.domain.model.Account
 import com.stler.money.domain.model.Category
 import com.stler.money.domain.model.Transaction
+import com.stler.money.domain.model.TransactionDraft
 import com.stler.money.domain.model.TransactionType
 import com.stler.money.ui.BaseViewModel
 import com.stler.money.ui.navigation.Screen
@@ -19,10 +21,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import java.time.LocalDate
 import javax.inject.Inject
 
 data class TransactionsUiState(
     val transactions: List<Transaction> = emptyList(),
+    val drafts: List<TransactionDraft> = emptyList(),
+    /** Most-used primary category over the last month — dimmed hint shown on draft rows and
+     * the real prefill when a draft is opened for confirmation (see MainScreen.openDraftForm). */
+    val suggestedCategoryId: String? = null,
     val accountsById: Map<String, Account> = emptyMap(),
     val categoriesById: Map<String, Category> = emptyMap(),
     /**
@@ -57,6 +64,7 @@ class TransactionsViewModel @Inject constructor(
     transactionRepository: TransactionRepository,
     accountRepository: AccountRepository,
     categoryRepository: CategoryRepository,
+    draftRepository: TransactionDraftRepository,
     savedStateHandle: SavedStateHandle,
 ) : BaseViewModel() {
 
@@ -72,6 +80,13 @@ class TransactionsViewModel @Inject constructor(
 
     private val _search = MutableStateFlow("")
     val search: StateFlow<String> = _search.asStateFlow()
+
+    // Local UI-only toggle — deliberately NOT part of TransactionFilterState, which filters
+    // real transactions from the DB; this only switches which items TransactionsScreen
+    // renders from the already-fetched drafts/transactions.
+    private val _showDraftsOnly = MutableStateFlow(false)
+    val showDraftsOnly: StateFlow<Boolean> = _showDraftsOnly.asStateFlow()
+    fun toggleDraftsOnly() { _showDraftsOnly.value = !_showDraftsOnly.value }
 
     val accounts = accountRepository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -108,17 +123,38 @@ class TransactionsViewModel @Inject constructor(
         _search.value = ""
     }
 
+    private data class BaseTransactionsState(
+        val transactions: List<Transaction>,
+        val accounts: List<Account>,
+        val categories: List<Category>,
+        val filter: TransactionFilterState,
+        val searchQuery: String,
+    )
+
     val uiState = combine(
-        transactionRepository.observeAll(),
-        accountRepository.observeAll(),
-        categoryRepository.observeAll(),
-        filterState,
-        search,
-    ) { transactions, accounts, categories, filter, searchQuery ->
+        combine(
+            transactionRepository.observeAll(),
+            accountRepository.observeAll(),
+            categoryRepository.observeAll(),
+            filterState,
+            search,
+        ) { transactions, accounts, categories, filter, searchQuery ->
+            BaseTransactionsState(transactions, accounts, categories, filter, searchQuery)
+        },
+        draftRepository.observeAll(),
+    ) { base, drafts ->
+        val monthAgo = LocalDate.now().minusMonths(1).toString()
+        val suggestedCategoryId = base.transactions
+            .filter { it.date >= monthAgo }
+            .mapNotNull { it.categoryIds.firstOrNull() } // primary category only
+            .groupingBy { it }.eachCount()
+            .maxByOrNull { it.value }?.key
         TransactionsUiState(
-            transactions = transactions.filter { it.matchesFilter(filter, searchQuery) },
-            accountsById = accounts.associateBy { it.id },
-            categoriesById = categories.associateBy { it.id },
+            transactions = base.transactions.filter { it.matchesFilter(base.filter, base.searchQuery) },
+            drafts = drafts,
+            suggestedCategoryId = suggestedCategoryId,
+            accountsById = base.accounts.associateBy { it.id },
+            categoriesById = base.categories.associateBy { it.id },
             isLoading = false,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TransactionsUiState())

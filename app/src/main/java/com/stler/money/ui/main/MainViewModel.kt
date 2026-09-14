@@ -4,11 +4,13 @@ import androidx.lifecycle.viewModelScope
 import com.stler.money.auth.AuthData
 import com.stler.money.auth.GoogleAuthRepository
 import com.stler.money.data.repository.ExchangeRateRepository
+import com.stler.money.data.repository.TransactionDraftRepository
 import com.stler.money.sync.SyncManager
 import com.stler.money.sync.SyncState
 import com.stler.money.ui.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
@@ -17,6 +19,7 @@ class MainViewModel @Inject constructor(
     private val syncManager: SyncManager,
     authRepository: GoogleAuthRepository,
     private val exchangeRateRepository: ExchangeRateRepository,
+    draftRepository: TransactionDraftRepository,
 ) : BaseViewModel() {
 
     val syncState = syncManager.syncState
@@ -24,6 +27,12 @@ class MainViewModel @Inject constructor(
 
     val authData = authRepository.authData
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AuthData())
+
+    /** Drives the drafts badge in the top bar — lives here (not TransactionsViewModel)
+     * since the badge itself is a MainScreen-level top-bar concern, like [syncState]. */
+    val draftsCount = draftRepository.observeAll()
+        .map { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     init {
         syncManager.triggerSync()
