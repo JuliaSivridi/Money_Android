@@ -786,13 +786,9 @@ this entry just tracks what shipped and what's still open.
 - Four whitelisted sources (§18.2): `GooglePayParser`
   (`com.google.android.apps.walletnfcrel`), `WiseParser`
   (`com.transferwise.android`), `RevolutParser` (`com.revolut.revolut`),
-  `SPankkiParser` (`fi.spankki`) — Julia's real routing: her husband pays
-  with his own phone using her Wise-linked card, so *her* phone sees Wise's
-  own notifications, not a bank app's; when she pays herself it's Google
-  Wallet with an S-Pankki card behind it, so she sees Google Pay
-  notifications, never S-Pankki's directly. More Finnish banks may follow
-  the same way. Draft prefill's `comment` is always left blank (was
-  `sourceLabel` initially — removed per her explicit feedback).
+  `SPankkiParser` (`fi.spankki`). More Finnish banks may follow the same
+  way. Draft prefill's `comment` is always left blank (was `sourceLabel`
+  initially — removed per her explicit feedback).
 - `SettingsScreen` "Bank notifications" card: grant/manage-access button
   (`Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`), rechecked on
   `ON_RESUME`; debug-only "Add test draft" button

@@ -8,12 +8,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/**
- * No real Wise notification sample was available while writing this (same caveat as
- * GooglePayParser) — best-effort amount+currency search only. Julia's most common real
- * case: her husband pays with his own phone using her Wise-linked card, so this fires on
- * her phone from the Wise app itself, not from a bank/wallet app.
- */
+/** No real Wise notification sample was available while writing this — same
+ * best-effort amount+currency search as the other parsers (see GooglePayParser). */
 class WiseParser : NotificationParser {
     override val packageName = "com.transferwise.android"
     override val sourceLabel = "Wise"

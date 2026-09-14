@@ -1552,12 +1552,8 @@ a static per-parser string, **not** necessarily the underlying bank/card
 that was actually charged — e.g. Google Wallet aggregates multiple cards,
 and extracting which one was used would require that information to
 actually be present in the notification text, which is unknown without a
-real sample. Julia's real-world routing: her husband pays with his own
-phone using her Wise-linked card, so on *her* phone the notification comes
-from the Wise app itself, not a bank app; when she pays herself it's via
-Google Wallet with an S-Pankki card behind it, and she never sees an
-S-Pankki notification directly. More Finnish banks may be added the same
-way later — one more `NotificationParser` + a registry entry each.
+real sample. More Finnish banks may be added the same way later — one more
+`NotificationParser` + a registry entry each.
 
 ### 18.3 Access — SettingsScreen card
 
