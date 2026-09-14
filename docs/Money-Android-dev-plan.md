@@ -780,8 +780,19 @@ this entry just tracks what shipped and what's still open.
   `NotificationParserRegistry` (plain list whitelist) + `MoneyAmountExtractor`
   (shared amount/currency extraction — the only real cross-source parsing
   logic, since merchant is never captured) + `MoneyNotificationListenerService`
-  (`@AndroidEntryPoint`, field-injected like `MainActivity`) +
-  `parsers/GooglePayParser` (`com.google.android.apps.walletnfcrel`).
+  (`@AndroidEntryPoint`, field-injected like `MainActivity`). Confirmed
+  on-device: notification access toggles on, "Add test draft" works, drafts
+  look right in the list, Cancel/Delete/Save all behave as designed.
+- Four whitelisted sources (§18.2): `GooglePayParser`
+  (`com.google.android.apps.walletnfcrel`), `WiseParser`
+  (`com.transferwise.android`), `RevolutParser` (`com.revolut.revolut`),
+  `SPankkiParser` (`fi.spankki`) — Julia's real routing: her husband pays
+  with his own phone using her Wise-linked card, so *her* phone sees Wise's
+  own notifications, not a bank app's; when she pays herself it's Google
+  Wallet with an S-Pankki card behind it, so she sees Google Pay
+  notifications, never S-Pankki's directly. More Finnish banks may follow
+  the same way. Draft prefill's `comment` is always left blank (was
+  `sourceLabel` initially — removed per her explicit feedback).
 - `SettingsScreen` "Bank notifications" card: grant/manage-access button
   (`Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`), rechecked on
   `ON_RESUME`; debug-only "Add test draft" button
@@ -805,12 +816,12 @@ this entry just tracks what shipped and what's still open.
   Cancel or just by opening the form.
 
 **Open / follow-up, not blocking this branch:**
-- `GooglePayParser`'s amount-extraction is best-effort — no real Google
-  Wallet notification sample was available while writing it. Every
-  notification from the whitelisted package logs raw title+text
-  unconditionally (tag `MoneyNotificationListener`) specifically so a real
-  sample can be captured from Logcat and used to tighten it; separate
-  small follow-up once one is seen.
+- All four parsers' amount-extraction is best-effort — no real notification
+  sample was available for any of them while writing this. Every
+  notification from a whitelisted package logs raw title+text
+  unconditionally (tag `MoneyNotificationListener`) specifically so real
+  samples can be captured from Logcat and used to tighten each one;
+  separate small follow-up once they're seen.
 - `sourceLabel` ("Google Pay") is a static per-parser string, not the
   actual underlying bank/card charged — Google Wallet aggregates multiple
   cards. Extracting the real one (if even present in the notification

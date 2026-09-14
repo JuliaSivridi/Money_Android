@@ -13,11 +13,11 @@ data class TransactionDraft(
     val date: String, // ISO "YYYY-MM-DD"
 )
 
-/** Prefill for [TransactionFormSheet] when opening a draft — merchant is never captured. */
+/** Prefill for [TransactionFormSheet] when opening a draft — merchant is never captured,
+ * and comment is left blank (not the source label) per the user's explicit request. */
 fun TransactionDraft.toPrefillTransaction(suggestedCategoryId: String?) = Transaction(
     id = "",
     date = date,
     amount = amount,
-    comment = sourceLabel,
     categoryIds = suggestedCategoryId?.let { listOf(it) } ?: emptyList(),
 )

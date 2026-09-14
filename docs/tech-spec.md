@@ -1537,14 +1537,27 @@ number, number-then-code, handling both `1,234.56` and `1.234,56` grouping.
 This sidesteps almost all of the source-specific-phrasing risk a "parse the
 whole sentence" approach would carry.
 
-**`GooglePayParser`** — `packageName = "com.google.android.apps.walletnfcrel"`
-(Google Wallet/Pay, confirmed exact by the user), `sourceLabel = "Google Pay"`.
-No real notification sample was available while writing this — see §18.5.
-`sourceLabel` is a static per-parser string, **not** the underlying bank/
-card that was actually charged; Google Wallet aggregates multiple cards,
+**Whitelisted sources (v1):**
+
+| Parser | `packageName` | `sourceLabel` |
+|---|---|---|
+| `GooglePayParser` | `com.google.android.apps.walletnfcrel` | "Google Pay" |
+| `WiseParser` | `com.transferwise.android` | "Wise" |
+| `RevolutParser` | `com.revolut.revolut` | "Revolut" |
+| `SPankkiParser` | `fi.spankki` | "S-Pankki" |
+
+All four confirmed exact by the user; no real notification sample was
+available for any of them while writing this — see §18.5. `sourceLabel` is
+a static per-parser string, **not** necessarily the underlying bank/card
+that was actually charged — e.g. Google Wallet aggregates multiple cards,
 and extracting which one was used would require that information to
 actually be present in the notification text, which is unknown without a
-real sample.
+real sample. Julia's real-world routing: her husband pays with his own
+phone using her Wise-linked card, so on *her* phone the notification comes
+from the Wise app itself, not a bank app; when she pays herself it's via
+Google Wallet with an S-Pankki card behind it, and she never sees an
+S-Pankki notification directly. More Finnish banks may be added the same
+way later — one more `NotificationParser` + a registry entry each.
 
 ### 18.3 Access — SettingsScreen card
 

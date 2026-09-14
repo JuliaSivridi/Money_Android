@@ -3,7 +3,7 @@ package com.stler.money.notifications.parsers
 import com.stler.money.data.repository.ParsedDraft
 import com.stler.money.notifications.MoneyAmountExtractor
 import com.stler.money.notifications.NotificationParser
-import java.security.MessageDigest
+import com.stler.money.notifications.hashNotificationText
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -26,15 +26,10 @@ class GooglePayParser : NotificationParser {
             sourcePackage = packageName,
             sourceLabel = sourceLabel,
             notificationKey = notificationKey,
-            textHash = hashOf(title, text),
+            textHash = hashNotificationText(title, text),
             amount = money.amount,
             currency = money.currency,
             date = LocalDate.ofInstant(postedAt, ZoneId.systemDefault()).toString(),
         )
-    }
-
-    private fun hashOf(title: String, text: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest("$title|$text".toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
     }
 }
