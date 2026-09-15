@@ -36,6 +36,26 @@ interface TransactionDraftDao {
         sinceIso: String,
     ): TransactionDraftEntity?
 
+    /**
+     * Cross-source correlation — different apps (e.g. a wallet app and the bank's own
+     * app) can each post their own notification for the *same* real-world transaction.
+     * Matching purely on amount+currency within [sinceIso] is the only signal available
+     * without understanding each source's specific text; scoped to a tighter window than
+     * [findRecentDuplicate] since it's a fuzzier match.
+     */
+    @Query(
+        """
+        SELECT * FROM transaction_drafts
+        WHERE amount = :amount AND currency = :currency AND createdAt >= :sinceIso
+        ORDER BY createdAt DESC
+        LIMIT 1
+        """,
+    )
+    suspend fun findRecentSameAmount(amount: Double, currency: String, sinceIso: String): TransactionDraftEntity?
+
+    @Query("UPDATE transaction_drafts SET accountId = :accountId WHERE id = :id")
+    suspend fun updateAccountId(id: String, accountId: String)
+
     @Insert
     suspend fun insert(draft: TransactionDraftEntity)
 

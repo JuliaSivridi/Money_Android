@@ -80,7 +80,7 @@ class MoneyNotificationListenerService : NotificationListenerService() {
         }
 
         scope.launch {
-            val inserted = draftRepository.insertIfNotDuplicate(parsed)
+            val inserted = draftRepository.recordNotification(parsed)
             Log.d(TAG, if (inserted) "Draft created: ${parsed.amount} ${parsed.currency}" else "Duplicate — skipped")
         }
     }

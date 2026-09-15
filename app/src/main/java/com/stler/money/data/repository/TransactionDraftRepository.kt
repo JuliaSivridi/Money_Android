@@ -18,6 +18,12 @@ interface TransactionDraftRepository {
     fun observeAll(): Flow<List<TransactionDraft>>
     suspend fun deleteById(id: String)
 
-    /** Returns true if a new draft was inserted, false if a recent duplicate suppressed it. */
-    suspend fun insertIfNotDuplicate(parsed: ParsedDraft): Boolean
+    /**
+     * Records one parsed notification: resolves which Account (if any) recognizes its
+     * source package, then either inserts a new draft, merges it into a recent draft for
+     * the same real-world event reported by a different source (upgrading that draft's
+     * account if this notification resolves it), or drops it as a plain duplicate. Returns
+     * true only when a new draft row was actually inserted.
+     */
+    suspend fun recordNotification(parsed: ParsedDraft): Boolean
 }

@@ -2,6 +2,7 @@ package com.stler.money.data.repository
 
 import com.google.gson.Gson
 import com.stler.money.data.local.dao.AccountDao
+import com.stler.money.data.local.dao.AccountNotificationSourceDao
 import com.stler.money.data.local.dao.SyncQueueDao
 import com.stler.money.data.local.entity.AccountEntity
 import com.stler.money.data.local.entity.SyncQueueEntity
@@ -20,6 +21,7 @@ import javax.inject.Singleton
 class AccountRepositoryImpl @Inject constructor(
     private val accountDao: AccountDao,
     private val syncQueueDao: SyncQueueDao,
+    private val notificationSourceDao: AccountNotificationSourceDao,
     private val sheetsApi: SheetsApi,
     private val mapper: SheetsMapper,
     private val gson: Gson,
@@ -72,6 +74,15 @@ class AccountRepositoryImpl @Inject constructor(
     override suspend fun clearAllLocalData() {
         accountDao.deleteAll()
     }
+
+    override suspend fun getNotificationSources(accountId: String): Set<String> =
+        notificationSourceDao.getPackagesForAccount(accountId).toSet()
+
+    override suspend fun setNotificationSources(accountId: String, packageNames: Set<String>) =
+        notificationSourceDao.replaceForAccount(accountId, packageNames)
+
+    override suspend fun accountIdsForNotificationPackage(packageName: String): List<String> =
+        notificationSourceDao.getAccountIdsForPackage(packageName)
 
     private suspend fun enqueue(type: String, op: String, id: String, payload: AccountEntity?) {
         syncQueueDao.enqueue(

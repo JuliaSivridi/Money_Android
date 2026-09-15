@@ -137,6 +137,7 @@ fun TransactionsScreen(
                             )
                             is TransactionListEntry.Draft -> DraftRow(
                                 draft = entry.draft,
+                                account = state.accountsById[entry.draft.accountId],
                                 suggestedCategory = suggestedCategory,
                                 onClick = { onDraftClick(entry.draft, suggestedCategory?.id) },
                             )
@@ -155,7 +156,7 @@ fun TransactionsScreen(
  * stay full-brightness, same as a real row.
  */
 @Composable
-private fun DraftRow(draft: TransactionDraft, suggestedCategory: Category?, onClick: () -> Unit) {
+private fun DraftRow(draft: TransactionDraft, account: Account?, suggestedCategory: Category?, onClick: () -> Unit) {
     val containerSize = IconSizes.lg + 12.dp
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -187,7 +188,9 @@ private fun DraftRow(draft: TransactionDraft, suggestedCategory: Category?, onCl
             )
             // Second line matches a real row's time·account line — full brightness, not
             // dimmed, same as the amount (only the icon/category hint above is muted).
-            Text(draft.sourceLabel, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Shows the resolved account's name once known, falling back to the raw
+            // source label ("Wise", "Google Pay", …) while it's still unresolved.
+            Text(account?.name ?: draft.sourceLabel, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(formatAmount(draft.amount, draft.currency), style = MaterialTheme.typography.bodyLarge)
     }

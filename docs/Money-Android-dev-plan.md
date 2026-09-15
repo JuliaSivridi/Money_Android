@@ -792,8 +792,9 @@ this entry just tracks what shipped and what's still open.
 - `SettingsScreen` "Bank notifications" card: grant/manage-access button
   (`Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`), rechecked on
   `ON_RESUME`; debug-only "Add test draft" button
-  (`TransactionDraftRepository.insertIfNotDuplicate` direct call) so the
-  drafts UI is testable without a real notification or a working parser.
+  (`TransactionDraftRepository` direct call, method since renamed to
+  `recordNotification` — see below) so the drafts UI is testable without a
+  real notification or a working parser.
 - Drafts merged into `TransactionsScreen`'s existing date-grouped list per
   Julia's explicit request (not a separate screen) — dimmed icon/category
   hint (most-used category over the trailing month, computed in
@@ -850,11 +851,34 @@ this entry just tracks what shipped and what's still open.
   same instant. Fixed by having `TransactionsScreen.onDraftClick` pass the
   *exact* resolved category id the tapped row was showing straight up to
   `MainScreen.openDraftForm`, eliminating the second collection entirely.
-  Account was never addressed before this round — added: `openDraftForm`
-  now matches an `Account` by name against the draft's `sourceLabel`
-  (case-insensitive; e.g. an account named "Wise" auto-selects for a
-  Wise-caught draft), falling back to the form's normal default-account
-  behavior when no name matches.
+  Account was never addressed before this round — added a first pass
+  matching an `Account` by name against the draft's `sourceLabel`;
+  superseded the same round-trip later by the explicit per-account
+  mapping below.
+
+**Round 3 — explicit per-account notification recognition:**
+- Name-matching (round 2) replaced with an explicit mapping: `AccountFormSheet`
+  gets a "Recognize notifications" checkbox (edit mode only, mirroring the
+  existing "Archive account" checkbox) that reveals one checkbox per
+  whitelisted source (`NotificationParserRegistry.allSources`).
+  `AccountRepository.setNotificationSources`/`getNotificationSources`/
+  `accountIdsForNotificationPackage` persist and query the new local-only
+  `account_notification_sources` table (Room 2→3 migration).
+- `TransactionDraftRepository.insertIfNotDuplicate` renamed
+  `recordNotification` and rewritten: resolves candidate accounts for the
+  incoming package (0/1/many via the new table), then runs two dedup
+  passes — the original same-source check (`notificationKey`/`textHash`)
+  and a new cross-source one (`findRecentSameAmount`, amount+currency
+  within a tighter window) that lets a second, differently-sourced
+  notification for the same event either get dropped or, if it resolves
+  an account the first one couldn't, upgrade that earlier draft's
+  `accountId` in place (`updateAccountId`) instead of creating a second
+  draft. `transaction_drafts` gained an `accountId` column for this.
+  `MainScreen.openDraftForm`'s name-matching heuristic is gone —
+  `TransactionDraft.toPrefillTransaction` just carries the already-resolved
+  `accountId` straight through.
+- `DraftRow`'s second line now shows the resolved Account's name once
+  known, falling back to the raw source label while unresolved.
 
 **Open / follow-up, not blocking this branch:**
 - All four parsers' amount-extraction is best-effort — no real notification

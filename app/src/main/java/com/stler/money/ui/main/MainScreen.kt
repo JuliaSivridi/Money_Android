@@ -139,14 +139,12 @@ fun MainScreen(
     // suggestedCategoryId comes straight from the tapped DraftRow (TransactionsScreen's
     // onDraftClick) rather than being re-read here independently — guarantees the form
     // opens with exactly the category that row was showing, not a second, possibly
-    // differently-timed collection of the same StateFlow.
+    // differently-timed collection of the same StateFlow. The account, if any, is already
+    // resolved on the draft itself (TransactionDraftRepositoryImpl.recordNotification) —
+    // no matching needed here.
     fun openDraftForm(draft: TransactionDraft, suggestedCategoryId: String?) {
         editingTransaction = null
-        // Best-effort account match: an Account named exactly like the notification
-        // source (e.g. an account named "Wise" for Wise-caught drafts) is preselected;
-        // no match just falls back to the form's own default-account behavior.
-        val matchedAccountId = filterAccounts.firstOrNull { it.name.equals(draft.sourceLabel, ignoreCase = true) }?.id
-        copyFromTransaction = draft.toPrefillTransaction(suggestedCategoryId, matchedAccountId)
+        copyFromTransaction = draft.toPrefillTransaction(suggestedCategoryId)
         confirmingDraftId = draft.id
         showTransactionForm = true
     }

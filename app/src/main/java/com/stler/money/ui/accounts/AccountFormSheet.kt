@@ -68,6 +68,16 @@ fun AccountFormSheet(
     var archived by remember(account) { mutableStateOf(account?.archived ?: false) }
     var showColorPicker by remember { mutableStateOf(false) }
 
+    var recognizeNotifications by remember(account) { mutableStateOf(false) }
+    var selectedNotificationSources by remember(account) { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(account) {
+        if (account != null) {
+            val loaded = viewModel.loadNotificationSources(account.id)
+            selectedNotificationSources = loaded
+            recognizeNotifications = loaded.isNotEmpty()
+        }
+    }
+
     val nameFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { nameFocus.requestFocus() }
 
@@ -164,6 +174,40 @@ fun AccountFormSheet(
                     Checkbox(checked = archived, onCheckedChange = { archived = it })
                     Text("Archive account")
                 }
+
+                // Which whitelisted notification sources (see notifications/) should be
+                // attributed to this account — the account-level half of resolving a
+                // captured notification to a real Account; the other half lives in
+                // TransactionDraftRepositoryImpl.recordNotification.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = recognizeNotifications,
+                        onCheckedChange = {
+                            recognizeNotifications = it
+                            if (!it) selectedNotificationSources = emptySet()
+                        },
+                    )
+                    Text("Recognize notifications")
+                }
+                if (recognizeNotifications) {
+                    Column(modifier = Modifier.padding(start = 40.dp)) {
+                        viewModel.availableNotificationSources.forEach { source ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = source.packageName in selectedNotificationSources,
+                                    onCheckedChange = { checked ->
+                                        selectedNotificationSources = if (checked) {
+                                            selectedNotificationSources + source.packageName
+                                        } else {
+                                            selectedNotificationSources - source.packageName
+                                        }
+                                    },
+                                )
+                                Text(source.label)
+                            }
+                        }
+                    }
+                }
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -171,7 +215,7 @@ fun AccountFormSheet(
                 Spacer(Modifier.size(8.dp))
                 TextButton(
                     enabled = canSave,
-                    onClick = { viewModel.save(buildResult(), isEdit, onDismiss) },
+                    onClick = { viewModel.save(buildResult(), isEdit, selectedNotificationSources, onDismiss) },
                 ) { Text("Save") }
             }
         }

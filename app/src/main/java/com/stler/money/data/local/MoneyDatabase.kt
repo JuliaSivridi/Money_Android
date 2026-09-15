@@ -3,11 +3,13 @@ package com.stler.money.data.local
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import com.stler.money.data.local.dao.AccountDao
+import com.stler.money.data.local.dao.AccountNotificationSourceDao
 import com.stler.money.data.local.dao.CategoryDao
 import com.stler.money.data.local.dao.SyncQueueDao
 import com.stler.money.data.local.dao.TransactionDao
 import com.stler.money.data.local.dao.TransactionDraftDao
 import com.stler.money.data.local.entity.AccountEntity
+import com.stler.money.data.local.entity.AccountNotificationSourceEntity
 import com.stler.money.data.local.entity.CategoryEntity
 import com.stler.money.data.local.entity.SyncQueueEntity
 import com.stler.money.data.local.entity.TransactionCategoryCrossRef
@@ -22,8 +24,9 @@ import com.stler.money.data.local.entity.TransactionEntity
         TransactionCategoryCrossRef::class,
         SyncQueueEntity::class,
         TransactionDraftEntity::class,
+        AccountNotificationSourceEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class MoneyDatabase : RoomDatabase() {
@@ -32,4 +35,5 @@ abstract class MoneyDatabase : RoomDatabase() {
     abstract fun categoryDao(): CategoryDao
     abstract fun syncQueueDao(): SyncQueueDao
     abstract fun transactionDraftDao(): TransactionDraftDao
+    abstract fun accountNotificationSourceDao(): AccountNotificationSourceDao
 }

@@ -349,12 +349,14 @@ position) and deduplicated. See [§16.7](#167-category-delete-with-transfer).
 
 ### 5.6 Room Database
 
-**Database name:** `money.db` · **Room version:** 2 (bumped from 1 to add
-`transaction_drafts`, §18 — greenfield otherwise, no legacy Dexie migration
-baggage to replicate; Money PWA's `MoneyDB` → `MoneyDB2` migration history
-does not need porting). `fallbackToDestructiveMigration` is intentionally
-absent (see code review Phase 13 fix) — every version bump needs a real
-`Migration`, or the app crashes loudly instead of silently wiping the DB.
+**Database name:** `money.db` · **Room version:** 3 (1→2 added
+`transaction_drafts`; 2→3 added `transaction_drafts.accountId` and
+`account_notification_sources`, both §18 — greenfield otherwise, no legacy
+Dexie migration baggage to replicate; Money PWA's `MoneyDB` → `MoneyDB2`
+migration history does not need porting). `fallbackToDestructiveMigration`
+is intentionally absent (see code review Phase 13 fix) — every version
+bump needs a real `Migration`, or the app crashes loudly instead of
+silently wiping the DB.
 
 #### Table: `transactions`
 
@@ -441,7 +443,7 @@ comma string itself is only read/written at the Sheets-mapping boundary.
 | createdAt | TEXT NOT NULL | |
 | retryCount | INTEGER NOT NULL | Default 0 |
 
-#### Table: `transaction_drafts` (added in Room version 2 — see §18)
+#### Table: `transaction_drafts` (added in Room version 2, `accountId` in 3 — see §18)
 
 | Column | SQLite Type | Notes |
 |---|---|---|
@@ -453,12 +455,25 @@ comma string itself is only read/written at the Sheets-mapping boundary.
 | amount | REAL NOT NULL | |
 | currency | TEXT NOT NULL | |
 | date | TEXT NOT NULL | from the notification's post time |
-| createdAt | TEXT NOT NULL | insertion time — anchors the dedup window |
+| createdAt | TEXT NOT NULL | insertion time — anchors the dedup windows |
+| accountId | TEXT NOT NULL | Default `''` — resolved `Account` id, blank if none/ambiguous |
 
 No status column and **not part of `sync_queue`** — a row here IS the
 pending state; confirming (real Save) or dismissing (Delete) just deletes
 the row. Never synced to Sheets directly; only the real `Transaction`
 created when a draft is confirmed goes through the normal write path.
+
+#### Table: `account_notification_sources` (added in Room version 3 — see §18)
+
+| Column | SQLite Type | Notes |
+|---|---|---|
+| accountId | TEXT NOT NULL | part of composite primary key |
+| packageName | TEXT NOT NULL | part of composite primary key |
+
+`PRIMARY KEY(accountId, packageName)`. A local-only many-to-many mapping —
+which whitelisted notification packages a given `Account` should be
+attributed to. Not part of `Account`'s own Sheets-mirrored columns (§5.7)
+and never synced: it has no meaning on another device or the PWA.
 
 ### 5.7 Google Sheets Schema
 
@@ -779,11 +794,12 @@ transaction" text button.
 screen. Row layout mirrors a real `TransactionRow` exactly (icon | title +
 second line | amount alone on the right — not a second right-side line):
 dimmed icon + suggested-category name as the title (muted, since it's a
-guess, not a confirmed category), source label ("Wise", "Google Pay", …) as
-the full-brightness second line in the same place a real row's time·account
-line sits, and the amount at full brightness on the right with nothing
-else beside it. A `DraftsButton` next to the filter icon in
-`MoneyTopAppBar` (shown only when there's at least one pending draft)
+guess, not a confirmed category), and a full-brightness second line in the
+same place a real row's time·account line sits — the resolved `Account`'s
+name once known (§18.2), falling back to the raw source label ("Wise",
+"Google Pay", …) while unresolved — plus the amount at full brightness on
+the right with nothing else beside it. A `DraftsButton` next to the filter
+icon in `MoneyTopAppBar` (shown only when there's at least one pending draft)
 toggles the list to show only drafts; this is purely a display toggle on
 already-fetched data, unrelated to `TransactionFilterState`/`FilterMenu`,
 which stays scoped to real, persisted transactions. Tapping a draft row
@@ -821,6 +837,15 @@ opacity), icon tinted `color`; type icon (`Wallet` / `CreditCard` /
   `TransactionItem`'s delete.
 
 **Archived section:** hidden by default, "Show/Hide archived (N)" toggle.
+
+**`AccountFormSheet` — notification recognition (§18.2), edit mode only:**
+a "Recognize notifications" checkbox, mirroring the existing "Archive
+account" checkbox's `isEdit`-gating. Checking it reveals one checkbox per
+whitelisted notification source (`NotificationParserRegistry.allSources`);
+`AccountFormViewModel.save()` persists the selected package set to
+`account_notification_sources` (§5.6) alongside the normal
+create/update-account call. Purely local UI state — no Sheets column, no
+sync-queue entry.
 **Open debts section:** below account sections — debt transactions where
 `debtRefId` is empty and whose `id` is not referenced as anyone's `debtRefId`.
 Lent → `error` color; borrowed → green.
@@ -1514,20 +1539,43 @@ never just by opening it.
 
 ### 18.1 Data — local only, never synced
 
-`transaction_drafts` (§5.6) is a plain, un-synced Room table — no row in it
-ever reaches `sync_queue` or Sheets. A row IS the pending state: there's no
-status column, confirming (real Save) or dismissing (Delete) just deletes
-the row. Not cleared by `switchSpreadsheet()` — drafts are local captures
-from the phone, not data belonging to a specific spreadsheet.
+`transaction_drafts` and `account_notification_sources` (§5.6) are plain,
+un-synced Room tables — no row in either ever reaches `sync_queue` or
+Sheets. A `transaction_drafts` row IS the pending state: there's no status
+column, confirming (real Save) or dismissing (Delete) just deletes the
+row. Not cleared by `switchSpreadsheet()` — drafts, and the per-account
+source mapping, are local to the phone, not data belonging to a specific
+spreadsheet.
 
-`TransactionDraftRepository.insertIfNotDuplicate(parsed: ParsedDraft): Boolean`
-dedups before inserting: primary key is `notificationKey` (Android reuses
-the same `StatusBarNotification.key` when a notification is updated in
-place, e.g. a bank correcting an amount seconds after posting); fallback
-is `textHash` (SHA-256 of raw title+text), for the rarer case where the
-source posts a fresh key for what's really the same event. Both are scoped
-to a 5-minute window anchored on `createdAt`, so an old, long-since-handled
-draft with a coincidentally matching hash can't suppress a genuinely new one.
+`TransactionDraftRepository.recordNotification(parsed: ParsedDraft): Boolean`
+is the single entry point for every captured notification, whether it
+came from the live listener or a rescan (§18.6) — it resolves an `Account`
+for the event, dedups, and either inserts a new draft or merges into an
+existing one:
+
+1. **Resolve an Account.** `AccountRepository.accountIdsForNotificationPackage(sourcePackage)`
+   returns every Account configured (§18.2) to recognize that package.
+   Exactly one match resolves to that Account; zero or more than one is
+   left ambiguous (`accountId = ""`) — nothing further can disambiguate
+   from the notification's package alone.
+2. **Same-source dedup.** `TransactionDraftDao.findRecentDuplicate` matches
+   on `notificationKey` (Android reuses the same `StatusBarNotification.key`
+   when a notification is updated in place, e.g. a source correcting an
+   amount seconds after posting) or, failing that, `textHash` (SHA-256 of
+   raw title+text). Scoped to a 5-minute window anchored on `createdAt`, so
+   an old, long-since-handled draft with a coincidentally matching hash
+   can't suppress a genuinely new one. A match here is dropped outright.
+3. **Cross-source correlation.** Different apps can each post their own
+   notification for the same real-world event. `findRecentSameAmount`
+   matches purely on `amount`+`currency` within a tighter 2-minute window
+   (a fuzzier signal than step 2, so kept short) regardless of source
+   package. A match here means this notification is treated as a second
+   report of an already-recorded event: if that earlier draft's `accountId`
+   is still blank and this notification resolved one, the earlier draft is
+   upgraded in place (`updateAccountId`); either way, nothing new is
+   inserted.
+4. Otherwise, a new `transaction_drafts` row is inserted with the resolved
+   `accountId` (possibly blank).
 
 ### 18.2 Capture — `notifications/` package
 
@@ -1567,6 +1615,19 @@ actually be present in the notification text, which is unknown without a
 real sample. More Finnish banks may be added the same way later — one more
 `NotificationParser` + a registry entry each.
 
+**Attributing a notification's package to an Account** is a separate,
+explicit, user-configured step — it does not depend on parsing anything
+out of the notification text (§18.1 covers the resolution algorithm this
+feeds). `NotificationParserRegistry.allSources` exposes every whitelisted
+`(packageName, sourceLabel)` pair as `NotificationSource`, purely so
+`AccountFormSheet` can render one checkbox per source without knowing
+about `NotificationParser` itself (§8.2). The same package can be checked
+for more than one Account at once (e.g. because the same wallet app can be
+behind more than one underlying card) — that's what makes an
+`accountIdsForNotificationPackage` lookup ambiguous, and is exactly what
+§18.1's cross-source correlation step exists to resolve when a second,
+more specific notification corroborates it.
+
 ### 18.3 Access — SettingsScreen card
 
 No separate screen: a card in the existing `SettingsScreen` (§8.6, title
@@ -1577,7 +1638,7 @@ this app's package) and a button to
 `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`. Rechecked on `ON_RESUME`
 since granting/revoking happens outside this screen, in system settings.
 No debug-only test-draft button any more — removed once the feature was
-confirmed working on-device; `insertIfNotDuplicate` is exercised for real
+confirmed working on-device; `recordNotification` is exercised for real
 by the notification listener and the rescan path (§18.6) now.
 
 ### 18.4 Confirming a draft — reuses `copyFrom`, not a parallel prefill path
@@ -1603,15 +1664,12 @@ prefill mechanism rather than adding a second one:
   guaranteed the two collectors observed the value at the same moment).
   Falls back to a neutral "Uncategorized" look/no prefill when there's no
   recent categorized history (e.g. a fresh install).
-- **Suggested account:** `MainScreen.openDraftForm` also looks for an
-  `Account` whose `name` equals the draft's `sourceLabel` (case-
-  insensitive) and prefills `accountId` with it when found — e.g. an
-  account literally named "Wise" gets picked for a Wise-caught draft. Pure
-  name-matching, no separate mapping table; a source with no
-  correspondingly-named account just falls back to the form's own
-  default-account behavior, same as a plain create. No match is attempted
-  against `sourceLabel` values that aren't real bank/account names (there
-  currently are none — see §18.2's table).
+- **Account:** already resolved on the draft itself at capture time
+  (§18.1's `recordNotification`) — `toPrefillTransaction` just carries
+  `draft.accountId` straight into the prefill. When it's blank (no
+  configured Account recognizes the source, or more than one does and
+  nothing corroborated it), the form falls back to its own normal
+  default-account behavior, same as a plain create.
 - **Delete button**, only shown when `draftId != null` and no `isEdit`
   (no Copy button in that case — nothing to copy from yet): discards the
   draft, does not touch the balance (it never touched it).

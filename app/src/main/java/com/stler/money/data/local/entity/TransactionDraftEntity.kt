@@ -21,6 +21,10 @@ data class TransactionDraftEntity(
     val currency: String,
     val date: String,
     val createdAt: String,
+    /** Resolved via AccountNotificationSourceDao at capture time — blank when ambiguous
+     * (no account, or more than one, recognizes this notification's package) or when no
+     * account recognizes it at all. See TransactionDraftRepositoryImpl.recordNotification. */
+    val accountId: String = "",
 )
 
 fun TransactionDraftEntity.toDomain() = TransactionDraft(
@@ -29,4 +33,5 @@ fun TransactionDraftEntity.toDomain() = TransactionDraft(
     amount = amount,
     currency = currency,
     date = date,
+    accountId = accountId,
 )

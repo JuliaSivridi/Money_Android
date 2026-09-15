@@ -11,17 +11,16 @@ data class TransactionDraft(
     val amount: Double,
     val currency: String,
     val date: String, // ISO "YYYY-MM-DD"
+    /** Resolved Account id, or blank if none/ambiguous — see TransactionDraftRepository. */
+    val accountId: String = "",
 )
 
 /** Prefill for [TransactionFormSheet] when opening a draft — merchant is never captured,
- * and comment is left blank (not the source label) per the user's explicit request.
- * [accountId], when supplied, is the Account matched to this draft's source (see
- * MainScreen.openDraftForm) — left blank falls back to the form's own default-account
- * behavior, same as a plain create. */
-fun TransactionDraft.toPrefillTransaction(suggestedCategoryId: String?, accountId: String? = null) = Transaction(
+ * and comment is left blank (not the source label) per the user's explicit request. */
+fun TransactionDraft.toPrefillTransaction(suggestedCategoryId: String?) = Transaction(
     id = "",
     date = date,
     amount = amount,
-    accountId = accountId ?: "",
+    accountId = accountId,
     categoryIds = suggestedCategoryId?.let { listOf(it) } ?: emptyList(),
 )

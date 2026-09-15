@@ -18,4 +18,12 @@ interface AccountRepository {
 
     suspend fun fetchAllAndSave(spreadsheetId: String)
     suspend fun clearAllLocalData()
+
+    // ── Notification-source recognition (local-only, never synced — see notifications/) ──
+
+    suspend fun getNotificationSources(accountId: String): Set<String>
+    suspend fun setNotificationSources(accountId: String, packageNames: Set<String>)
+
+    /** Accounts (usually 0 or 1; more than 1 means ambiguous) that recognize [packageName]. */
+    suspend fun accountIdsForNotificationPackage(packageName: String): List<String>
 }
