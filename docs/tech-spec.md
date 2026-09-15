@@ -838,14 +838,23 @@ opacity), icon tinted `color`; type icon (`Wallet` / `CreditCard` /
 
 **Archived section:** hidden by default, "Show/Hide archived (N)" toggle.
 
-**`AccountFormSheet` — notification recognition (§18.2), edit mode only:**
-a "Recognize notifications" checkbox, mirroring the existing "Archive
-account" checkbox's `isEdit`-gating. Checking it reveals one checkbox per
-whitelisted notification source (`NotificationParserRegistry.allSources`);
+**`AccountFormSheet` — notification recognition (§18.2), edit mode +
+`type == CARD` only** (the only account type a payment notification could
+plausibly refer to): a clickable "Recognize notifications" trigger row
+(label + selected-count + chevron, matching the sibling app's label-picker
+trigger convention) opens `NotificationSourcePickerSheet` — a second
+`ModalBottomSheet` stacked on top of this one, listing every whitelisted
+source (`NotificationParserRegistry.allSources`) as a `ListItem` with a
+trailing check icon when selected, committing the whole multi-selection at
+once via an explicit "Done" button (not per-tap). The confirmed selection
+is echoed back in the form as removable `PillChip`s in a `FlowRow` (tapping
+a chip's own close icon removes it without reopening the sheet).
 `AccountFormViewModel.save()` persists the selected package set to
 `account_notification_sources` (§5.6) alongside the normal
-create/update-account call. Purely local UI state — no Sheets column, no
-sync-queue entry.
+create/update-account call — cleared instead if the account type was
+changed away from `CARD` before saving, so no stale mapping survives
+behind a picker the user can no longer even open. Purely local UI state —
+no Sheets column, no sync-queue entry.
 **Open debts section:** below account sections — debt transactions where
 `debtRefId` is empty and whose `id` is not referenced as anyone's `debtRefId`.
 Lent → `error` color; borrowed → green.
@@ -1122,8 +1131,19 @@ or `TabRow`).
 3. Account select (colored dot + name) + amount field, one row.
 4. Comment field.
 
-**Transfer tab additionally:** From account + amount, then To account (side-
-by-side with a `to_amount` field when currencies differ).
+**`time` field — no picker, matches the PWA exactly:** neither this form
+nor the real PWA's `TransactionModal.tsx` has a time-of-day input anywhere.
+A brand-new transaction (create, copy, or a confirmed draft — anything
+where `isEdit` is false) is stamped with the actual current wall-clock
+time at save (`util/TimeFormat.kt#currentTimeHHMM`, matching the PWA's
+`dateUtils.ts#currentTimeHHMM`); editing an existing transaction keeps its
+original `time` unchanged. "Mark as repaid" creates a genuinely new
+transaction too, so it gets its own fresh `currentTimeHHMM()` rather than
+inheriting the original debt transaction's `time`. A transaction whose
+`time` reads `"00:00"` is therefore either a genuinely-midnight entry or
+one pulled in from Sheets without a real time (the PWA writes a real
+`HH:mm` too, so `"00:00"` should be rare in practice, not the default it
+might look like from the column's own default value in §5.7).
 
 **Debt tab additionally:** "I lent" / "I borrowed" toggle, comment relabeled
 "Person's name", "Mark as repaid" button (edit mode only, when `debtRefId` is
@@ -1616,17 +1636,26 @@ real sample. More Finnish banks may be added the same way later — one more
 `NotificationParser` + a registry entry each.
 
 **Attributing a notification's package to an Account** is a separate,
-explicit, user-configured step — it does not depend on parsing anything
-out of the notification text (§18.1 covers the resolution algorithm this
-feeds). `NotificationParserRegistry.allSources` exposes every whitelisted
-`(packageName, sourceLabel)` pair as `NotificationSource`, purely so
-`AccountFormSheet` can render one checkbox per source without knowing
-about `NotificationParser` itself (§8.2). The same package can be checked
-for more than one Account at once (e.g. because the same wallet app can be
-behind more than one underlying card) — that's what makes an
+explicit, user-configured step (`AccountFormSheet`, §8.2, `type == CARD`
+accounts only) — it does not depend on parsing anything out of the
+notification text (§18.1 covers the resolution algorithm this feeds).
+`NotificationParserRegistry.allSources` exposes every whitelisted
+`(packageName, sourceLabel)` pair as `NotificationSource`, purely so the
+picker sheet can render one option per source without knowing about
+`NotificationParser` itself.
+
+Multi-select is per-Account, and one package can be checked for more than
+one Account at once (e.g. because the same wallet app can be behind more
+than one underlying card) — the latter is what makes an
 `accountIdsForNotificationPackage` lookup ambiguous, and is exactly what
 §18.1's cross-source correlation step exists to resolve when a second,
-more specific notification corroborates it.
+more specific notification corroborates it. The reverse case — one Account
+recognizing *more than one* package (e.g. both a wallet app and that
+account's own bank app) — needs no special handling: each package
+independently resolves straight to that Account (no ambiguity to begin
+with, since nothing else claims either package), and if both apps happen
+to notify about the same real event, §18.1's same-amount cross-source
+check still collapses them into a single draft rather than two.
 
 ### 18.3 Access — SettingsScreen card
 

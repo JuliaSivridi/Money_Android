@@ -72,6 +72,7 @@ import com.stler.money.ui.theme.Accent
 import com.stler.money.ui.theme.AccentDark
 import com.stler.money.ui.theme.ControlShape
 import com.stler.money.ui.util.ErrorSnackbarEffect
+import com.stler.money.util.currentTimeHHMM
 import com.stler.money.util.generateId
 import java.time.Instant
 import java.time.LocalDate
@@ -175,7 +176,10 @@ fun TransactionFormSheet(
         return Transaction(
             id = transaction?.id ?: generateId("txn"),
             date = date,
-            time = transaction?.time ?: "00:00",
+            // Matches the real PWA: no time-of-day picker, so a new transaction is stamped
+            // with the actual current wall-clock time at save, not a hardcoded default —
+            // editing keeps the original time.
+            time = transaction?.time ?: currentTimeHHMM(),
             type = type,
             amount = amount,
             currency = currency,

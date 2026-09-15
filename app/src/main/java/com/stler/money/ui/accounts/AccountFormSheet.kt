@@ -6,18 +6,25 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -42,6 +49,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.stler.money.domain.model.Account
 import com.stler.money.domain.model.AccountType
 import com.stler.money.ui.common.ColorPickerGrid
+import com.stler.money.ui.common.PillChip
 import com.stler.money.ui.common.SimpleDropdownField
 import com.stler.money.ui.theme.DEFAULT_ENTITY_COLOR
 import com.stler.money.ui.util.ErrorSnackbarEffect
@@ -68,14 +76,10 @@ fun AccountFormSheet(
     var archived by remember(account) { mutableStateOf(account?.archived ?: false) }
     var showColorPicker by remember { mutableStateOf(false) }
 
-    var recognizeNotifications by remember(account) { mutableStateOf(false) }
     var selectedNotificationSources by remember(account) { mutableStateOf(emptySet<String>()) }
+    var showNotificationSourcePicker by remember { mutableStateOf(false) }
     LaunchedEffect(account) {
-        if (account != null) {
-            val loaded = viewModel.loadNotificationSources(account.id)
-            selectedNotificationSources = loaded
-            recognizeNotifications = loaded.isNotEmpty()
-        }
+        if (account != null) selectedNotificationSources = viewModel.loadNotificationSources(account.id)
     }
 
     val nameFocus = remember { FocusRequester() }
@@ -178,32 +182,32 @@ fun AccountFormSheet(
                 // Which whitelisted notification sources (see notifications/) should be
                 // attributed to this account — the account-level half of resolving a
                 // captured notification to a real Account; the other half lives in
-                // TransactionDraftRepositoryImpl.recordNotification.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = recognizeNotifications,
-                        onCheckedChange = {
-                            recognizeNotifications = it
-                            if (!it) selectedNotificationSources = emptySet()
-                        },
-                    )
-                    Text("Recognize notifications")
-                }
-                if (recognizeNotifications) {
-                    Column(modifier = Modifier.padding(start = 40.dp)) {
-                        viewModel.availableNotificationSources.forEach { source ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = source.packageName in selectedNotificationSources,
-                                    onCheckedChange = { checked ->
-                                        selectedNotificationSources = if (checked) {
-                                            selectedNotificationSources + source.packageName
-                                        } else {
-                                            selectedNotificationSources - source.packageName
-                                        }
-                                    },
+                // TransactionDraftRepositoryImpl.recordNotification. Card-only: the other
+                // account types aren't the kind of thing a payment notification refers to.
+                if (type == AccountType.CARD) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { showNotificationSourcePicker = true }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Recognize notifications", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(4.dp))
+                        if (selectedNotificationSources.isNotEmpty()) {
+                            Text("${selectedNotificationSources.size}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Outlined.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (selectedNotificationSources.isNotEmpty()) {
+                        val selectedSources = viewModel.availableNotificationSources.filter { it.packageName in selectedNotificationSources }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            selectedSources.forEach { source ->
+                                PillChip(
+                                    selected = true,
+                                    onClick = { selectedNotificationSources = selectedNotificationSources - source.packageName },
+                                    label = source.label,
+                                    trailingContent = { Icon(Icons.Outlined.Close, contentDescription = "Remove ${source.label}", modifier = Modifier.size(14.dp)) },
                                 )
-                                Text(source.label)
                             }
                         }
                     }
@@ -215,10 +219,24 @@ fun AccountFormSheet(
                 Spacer(Modifier.size(8.dp))
                 TextButton(
                     enabled = canSave,
-                    onClick = { viewModel.save(buildResult(), isEdit, selectedNotificationSources, onDismiss) },
+                    onClick = {
+                        // Not Card any more (or was never edited into one) — don't persist a
+                        // stale mapping for a source picker the user can no longer even see.
+                        val sourcesToSave = if (type == AccountType.CARD) selectedNotificationSources else emptySet()
+                        viewModel.save(buildResult(), isEdit, sourcesToSave, onDismiss)
+                    },
                 ) { Text("Save") }
             }
         }
+    }
+
+    if (showNotificationSourcePicker) {
+        NotificationSourcePickerSheet(
+            allSources = viewModel.availableNotificationSources,
+            selectedPackages = selectedNotificationSources.toList(),
+            onConfirm = { selectedNotificationSources = it.toSet(); showNotificationSourcePicker = false },
+            onDismiss = { showNotificationSourcePicker = false },
+        )
     }
 }
 

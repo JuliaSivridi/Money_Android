@@ -880,6 +880,39 @@ this entry just tracks what shipped and what's still open.
 - `DraftRow`'s second line now shows the resolved Account's name once
   known, falling back to the raw source label while unresolved.
 
+**Round 4 — unrelated `time`-field bug found in passing, plus UI polish
+on Round 3's account-mapping feature:**
+- **Bug, not actually caused by anything in this branch:** every
+  newly-created transaction (create, copy, confirmed draft) had `time`
+  hardcoded to `"00:00"` in `TransactionFormSheet.buildResult()` — there
+  never was a time-of-day picker, but the real PWA's equivalent
+  (`TransactionModal.tsx`) stamps a real current-time value
+  (`currentTimeHHMM()`) instead of a fixed default; Android's port had
+  silently diverged from that. Fixed with a matching
+  `util/TimeFormat.kt#currentTimeHHMM()`, used both in
+  `TransactionFormSheet.buildResult()` and in
+  `TransactionFormViewModel.markAsRepaid()` (which was inheriting the
+  *original* debt transaction's `time` via `.copy()` instead of getting
+  its own, on top of the same underlying gap). Editing an existing
+  transaction still keeps its original `time`, unchanged.
+- **Notification-source picker restricted to `type == CARD` accounts** —
+  the only account type a payment notification could plausibly refer to.
+- **Picker UI replaced**: the checkbox + expanding-checkbox-list from
+  Round 3 is gone, replaced with the same shell the Tasks Android sibling
+  uses for its label picker — a clickable trigger row (label + selected
+  count + chevron) opens a second `ModalBottomSheet`
+  (`NotificationSourcePickerSheet`) listing each source as a `ListItem`
+  with a trailing check icon when selected, committed all at once via an
+  explicit "Done" button; the confirmed selection is echoed back as
+  removable `PillChip`s (added optional `trailingContent` to the shared
+  `PillChip` component for this). Multi-select was already correct
+  underneath (confirmed, no code change needed): a package shared by two
+  Accounts is what makes resolution ambiguous until a second, more
+  specific notification corroborates it (§18.1's cross-source pass), and
+  one Account recognizing multiple packages needs no special handling at
+  all, since each independently resolves straight to that Account and any
+  simultaneous duplicate still collapses into one draft.
+
 **Open / follow-up, not blocking this branch:**
 - All four parsers' amount-extraction is best-effort — no real notification
   sample was available for any of them while writing this. Every

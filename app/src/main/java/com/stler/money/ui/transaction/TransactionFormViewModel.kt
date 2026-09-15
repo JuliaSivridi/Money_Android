@@ -77,6 +77,10 @@ class TransactionFormViewModel @Inject constructor(
         val repayment = original.copy(
             id = com.stler.money.util.generateId("txn"),
             date = today,
+            // A new transaction, not an edit of the original one — its own current
+            // wall-clock time (matches the real PWA), not the original debt's `time`,
+            // which `.copy()` would otherwise carry over unchanged.
+            time = com.stler.money.util.currentTimeHHMM(),
             debtRefId = original.id,
             comment = "Repaid — ${original.comment}".trim(' ', '—'),
             createdAt = now,

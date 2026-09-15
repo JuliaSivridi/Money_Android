@@ -56,6 +56,7 @@ fun PillChip(
     label: String,
     modifier: Modifier = Modifier,
     leadingContent: (@Composable () -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     val contentColor = if (selected) selectedChipTextColor() else MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
@@ -73,6 +74,7 @@ fun PillChip(
         ) {
             leadingContent?.invoke()
             Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+            trailingContent?.invoke()
         }
     }
 }
