@@ -81,7 +81,7 @@ private sealed interface TransactionListEntry {
 @Composable
 fun TransactionsScreen(
     onTransactionClick: (Transaction) -> Unit = {},
-    onDraftClick: (TransactionDraft) -> Unit = {},
+    onDraftClick: (TransactionDraft, suggestedCategoryId: String?) -> Unit = { _, _ -> },
     viewModel: TransactionsViewModel = hiltViewModel(),
 ) {
     ErrorSnackbarEffect(viewModel)
@@ -138,7 +138,7 @@ fun TransactionsScreen(
                             is TransactionListEntry.Draft -> DraftRow(
                                 draft = entry.draft,
                                 suggestedCategory = suggestedCategory,
-                                onClick = { onDraftClick(entry.draft) },
+                                onClick = { onDraftClick(entry.draft, suggestedCategory?.id) },
                             )
                         }
                     }
@@ -185,11 +185,11 @@ private fun DraftRow(draft: TransactionDraft, suggestedCategory: Category?, onCl
                 text = suggestedCategory?.name ?: "Uncategorized",
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
             )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(formatAmount(draft.amount, draft.currency), style = MaterialTheme.typography.bodyLarge)
+            // Second line matches a real row's time·account line — full brightness, not
+            // dimmed, same as the amount (only the icon/category hint above is muted).
             Text(draft.sourceLabel, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Text(formatAmount(draft.amount, draft.currency), style = MaterialTheme.typography.bodyLarge)
     }
 }
 

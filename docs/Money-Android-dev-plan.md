@@ -818,7 +818,43 @@ this entry just tracks what shipped and what's still open.
   `activeNotifications` still holds (not yet swiped away) through the same
   `handle(sbn)` the live path uses — same parsing/logging/dedup either way.
   New "Rescan current notifications" button in the Settings card (only
-  shown once access is granted).
+  shown once access is granted). Confirmed working on-device, keeping it
+  in the release build (not debug-only) — the user found it genuinely
+  useful right away, catching a real missed Wise notification.
+
+**On-device feedback round 2 — all fixed:**
+- Debug-only "Add test draft" button + `SettingsViewModel.insertTestDraft()`
+  removed entirely (draft creation is now exercised for real, by the
+  rescan button and real notifications) — this was scaffolding for testing
+  before the real listener path was confirmed working, not a permanent
+  feature.
+- Settings card renamed "Bank notifications" → **"Access to Android
+  notifications"**, copy changed to "Google Pay or banks" instead of
+  listing the four parser labels — Google Pay/Wallet isn't a bank, and the
+  specific whitelist isn't meant to be user-facing detail (a bank picker
+  UI is a possible future feature per the user).
+- Both Settings-card buttons ("Grant/Manage access", "Rescan current
+  notifications") now `fillMaxWidth()` instead of sizing to their own
+  text — they were two different widths stacked on top of each other.
+- **`DraftRow` layout bug:** the source label ("Wise") was rendering as a
+  second line under the *amount* on the right, when it should mirror a
+  real `TransactionRow` exactly — second line under the *title* (left
+  side), amount alone on the right. Fixed; see tech spec §8.1.
+- **Category/account not actually prefilled bug:** opening a draft's form
+  showed neither the category hinted in its row nor any source-matched
+  account, even though the row already displayed a suggested category.
+  Root cause: `MainScreen` re-read `suggestedCategoryId` via its own
+  independent `collectAsStateWithLifecycle()` on `TransactionsViewModel
+  .uiState`, separate from `TransactionsScreen`'s own collection of the
+  same `StateFlow` — nothing guaranteed both saw the same value at the
+  same instant. Fixed by having `TransactionsScreen.onDraftClick` pass the
+  *exact* resolved category id the tapped row was showing straight up to
+  `MainScreen.openDraftForm`, eliminating the second collection entirely.
+  Account was never addressed before this round — added: `openDraftForm`
+  now matches an `Account` by name against the draft's `sourceLabel`
+  (case-insensitive; e.g. an account named "Wise" auto-selects for a
+  Wise-caught draft), falling back to the form's normal default-account
+  behavior when no name matches.
 
 **Open / follow-up, not blocking this branch:**
 - All four parsers' amount-extraction is best-effort — no real notification

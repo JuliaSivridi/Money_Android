@@ -89,12 +89,6 @@ fun MainScreen(
     fun openCreateTransaction() { editingTransaction = null; copyFromTransaction = null; confirmingDraftId = null; showTransactionForm = true }
     fun openEditTransaction(t: Transaction) { editingTransaction = t; copyFromTransaction = null; confirmingDraftId = null; showTransactionForm = true }
     fun openCopyTransaction(t: Transaction) { editingTransaction = null; copyFromTransaction = t; confirmingDraftId = null }
-    fun openDraftForm(draft: TransactionDraft, suggestedCategoryId: String?) {
-        editingTransaction = null
-        copyFromTransaction = draft.toPrefillTransaction(suggestedCategoryId)
-        confirmingDraftId = draft.id
-        showTransactionForm = true
-    }
 
     var showAccountForm by remember { mutableStateOf(false) }
     var editingAccount by remember { mutableStateOf<Account?>(null) }
@@ -127,23 +121,35 @@ fun MainScreen(
     val filterCategories: List<Category>
     val filterSearch: String
     val showDraftsOnly: Boolean
-    val suggestedCategoryId: String?
     if (transactionsViewModel != null) {
         filterState = transactionsViewModel.filterState.collectAsStateWithLifecycle().value
         filterAccounts = transactionsViewModel.accounts.collectAsStateWithLifecycle().value
         filterCategories = transactionsViewModel.categories.collectAsStateWithLifecycle().value
         filterSearch = transactionsViewModel.search.collectAsStateWithLifecycle().value
         showDraftsOnly = transactionsViewModel.showDraftsOnly.collectAsStateWithLifecycle().value
-        suggestedCategoryId = transactionsViewModel.uiState.collectAsStateWithLifecycle().value.suggestedCategoryId
     } else {
         filterState = TransactionFilterState()
         filterAccounts = emptyList()
         filterCategories = emptyList()
         filterSearch = ""
         showDraftsOnly = false
-        suggestedCategoryId = null
     }
     val draftsCount by viewModel.draftsCount.collectAsStateWithLifecycle()
+
+    // suggestedCategoryId comes straight from the tapped DraftRow (TransactionsScreen's
+    // onDraftClick) rather than being re-read here independently — guarantees the form
+    // opens with exactly the category that row was showing, not a second, possibly
+    // differently-timed collection of the same StateFlow.
+    fun openDraftForm(draft: TransactionDraft, suggestedCategoryId: String?) {
+        editingTransaction = null
+        // Best-effort account match: an Account named exactly like the notification
+        // source (e.g. an account named "Wise" for Wise-caught drafts) is preselected;
+        // no match just falls back to the form's own default-account behavior.
+        val matchedAccountId = filterAccounts.firstOrNull { it.name.equals(draft.sourceLabel, ignoreCase = true) }?.id
+        copyFromTransaction = draft.toPrefillTransaction(suggestedCategoryId, matchedAccountId)
+        confirmingDraftId = draft.id
+        showTransactionForm = true
+    }
 
     val screenTitle = when (currentRoute) {
         Screen.ACCOUNTS -> "Accounts"
@@ -287,7 +293,7 @@ fun MainScreen(
                 ) {
                     TransactionsScreen(
                         onTransactionClick = { openEditTransaction(it) },
-                        onDraftClick = { draft -> openDraftForm(draft, suggestedCategoryId) },
+                        onDraftClick = { draft, suggestedCategoryId -> openDraftForm(draft, suggestedCategoryId) },
                     )
                 }
                 composable(Screen.ACCOUNTS) {

@@ -39,7 +39,6 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -61,7 +60,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.stler.money.BuildConfig
 import com.stler.money.notifications.MoneyNotificationListenerService
 import com.stler.money.ui.theme.ControlShape
 import kotlinx.coroutines.launch
@@ -287,9 +285,9 @@ fun SettingsScreen(
                             modifier = Modifier.size(20.dp),
                         )
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Bank notifications", style = MaterialTheme.typography.bodyMedium)
+                            Text("Access to Android notifications", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (notificationAccessGranted) "Access granted — suggesting drafts from Google Pay, Wise, Revolut, S-Pankki" else "Suggest transaction drafts from Google Pay, Wise, Revolut, S-Pankki notifications",
+                                if (notificationAccessGranted) "Access granted — suggesting drafts from Google Pay or banks" else "Suggest transaction drafts from Google Pay or bank notifications",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -299,12 +297,13 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                         shape = ControlShape,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(if (notificationAccessGranted) "Manage access" else "Grant access")
                     }
 
                     if (notificationAccessGranted) {
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(8.dp))
                         // For a notification that was missed live (app not running yet, a
                         // brief listener hiccup) — re-reads whatever's still in the shade,
                         // not yet swiped away, instead of requiring the original moment.
@@ -319,15 +318,9 @@ fun SettingsScreen(
                                 }
                             },
                             shape = ControlShape,
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text("Rescan current notifications")
-                        }
-                    }
-
-                    if (BuildConfig.DEBUG) {
-                        Spacer(Modifier.height(4.dp))
-                        TextButton(onClick = { viewModel.insertTestDraft() }) {
-                            Text("Add test draft (debug)")
                         }
                     }
                 }

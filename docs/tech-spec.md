@@ -776,12 +776,18 @@ transaction" text button.
 
 **Draft rows (§18):** pending `TransactionDraft`s are merged into this same
 `LazyColumn`, grouped by date exactly like real transactions — no separate
-screen. A `DraftsButton` next to the filter icon in `MoneyTopAppBar` (shown
-only when there's at least one pending draft) toggles the list to show only
-drafts; this is purely a display toggle on already-fetched data, unrelated
-to `TransactionFilterState`/`FilterMenu`, which stays scoped to real,
-persisted transactions. Tapping a draft row opens `TransactionFormSheet`
-pre-filled from it (see §18).
+screen. Row layout mirrors a real `TransactionRow` exactly (icon | title +
+second line | amount alone on the right — not a second right-side line):
+dimmed icon + suggested-category name as the title (muted, since it's a
+guess, not a confirmed category), source label ("Wise", "Google Pay", …) as
+the full-brightness second line in the same place a real row's time·account
+line sits, and the amount at full brightness on the right with nothing
+else beside it. A `DraftsButton` next to the filter icon in
+`MoneyTopAppBar` (shown only when there's at least one pending draft)
+toggles the list to show only drafts; this is purely a display toggle on
+already-fetched data, unrelated to `TransactionFilterState`/`FilterMenu`,
+which stays scoped to real, persisted transactions. Tapping a draft row
+opens `TransactionFormSheet` pre-filled from it (see §18).
 
 ---
 
@@ -1012,17 +1018,21 @@ Navigation section, no feature-flag switches (Money has nothing to disable):**
 2. **Base currency** — segmented/select control: EUR / USD / RUB. Changing it
    calls `setBaseCurrency()` → persists to `settings!A1` → triggers
    `ExchangeRateRepository.refresh(currency)`.
-3. **Bank notifications** (§18) — status text
-   (`NotificationManagerCompat.getEnabledListenerPackages` contains this
-   app's package?) + a button opening
-   `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`; rechecked on `ON_RESUME`
-   since the grant/revoke happens outside this screen. When access is
-   granted, an additional "Rescan current notifications" button calls
+3. **"Access to Android notifications"** (§18) — deliberately neutral
+   title/copy, not "Bank notifications": Google Pay/Wallet isn't a bank,
+   and the status line ("...suggesting drafts from Google Pay or banks")
+   stays generic rather than naming specific banks, since the actual
+   whitelist (§18.2) may grow and isn't meant to be user-facing detail yet
+   (a picker to choose which sources are active is a possible follow-up).
+   Status text (`NotificationManagerCompat.getEnabledListenerPackages`
+   contains this app's package?) + a full-width button opening
+   `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`; rechecked on
+   `ON_RESUME` since the grant/revoke happens outside this screen. When
+   access is granted, a second full-width button, "Rescan current
+   notifications", calls
    `MoneyNotificationListenerService.rescanActiveNotifications()` — see
-   §18.6. Debug builds only: an extra "Add test draft" button that calls
-   `TransactionDraftRepository.insertIfNotDuplicate` directly with fixed
-   test data, bypassing the notification listener entirely — the intended
-   way to exercise the drafts UI without a real notification.
+   §18.6. Both buttons are `fillMaxWidth()` (not sized to their own text)
+   so they align consistently instead of two different widths side by side.
 
 ---
 
@@ -1559,11 +1569,16 @@ real sample. More Finnish banks may be added the same way later — one more
 
 ### 18.3 Access — SettingsScreen card
 
-No separate screen: a card in the existing `SettingsScreen` (§8.6) shows
-whether access is granted (`NotificationManagerCompat
-.getEnabledListenerPackages` contains this app's package) and a button to
+No separate screen: a card in the existing `SettingsScreen` (§8.6, title
+"Access to Android notifications" — deliberately neutral, not "Bank
+notifications", since Google Pay/Wallet isn't a bank) shows whether access
+is granted (`NotificationManagerCompat.getEnabledListenerPackages` contains
+this app's package) and a button to
 `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`. Rechecked on `ON_RESUME`
 since granting/revoking happens outside this screen, in system settings.
+No debug-only test-draft button any more — removed once the feature was
+confirmed working on-device; `insertIfNotDuplicate` is exercised for real
+by the notification listener and the rescan path (§18.6) now.
 
 ### 18.4 Confirming a draft — reuses `copyFrom`, not a parallel prefill path
 
@@ -1578,11 +1593,25 @@ prefill mechanism rather than adding a second one:
 - **Suggested category:** `TransactionsViewModel` computes
   `suggestedCategoryId` — the most-used *primary* category over the
   trailing month — from the same `transactions` flow already in its
-  `combine()`. The identical value both (a) renders as the dimmed
-  icon/name on the draft's row in the list and (b) prefills `categoryIds`
-  when the form opens, so what's shown always matches what gets prefilled.
-  Falls back to a neutral "Uncategorized" look when there's no recent
-  categorized history (e.g. a fresh install).
+  `combine()`, resolved to a `Category` in `TransactionsScreen` for the
+  dimmed icon/name on the draft's row. `TransactionsScreen.onDraftClick`
+  passes that **same resolved category id** straight up to
+  `MainScreen.openDraftForm` (not a second, independent
+  `collectAsStateWithLifecycle` read of the same `StateFlow` in
+  `MainScreen` — that was tried first and occasionally opened the form
+  with no category selected even though the row showed one, since nothing
+  guaranteed the two collectors observed the value at the same moment).
+  Falls back to a neutral "Uncategorized" look/no prefill when there's no
+  recent categorized history (e.g. a fresh install).
+- **Suggested account:** `MainScreen.openDraftForm` also looks for an
+  `Account` whose `name` equals the draft's `sourceLabel` (case-
+  insensitive) and prefills `accountId` with it when found — e.g. an
+  account literally named "Wise" gets picked for a Wise-caught draft. Pure
+  name-matching, no separate mapping table; a source with no
+  correspondingly-named account just falls back to the form's own
+  default-account behavior, same as a plain create. No match is attempted
+  against `sourceLabel` values that aren't real bank/account names (there
+  currently are none — see §18.2's table).
 - **Delete button**, only shown when `draftId != null` and no `isEdit`
   (no Copy button in that case — nothing to copy from yet): discards the
   draft, does not touch the balance (it never touched it).

@@ -8,8 +8,6 @@ import com.stler.money.data.remote.dto.DriveFile
 import com.stler.money.data.repository.AccountRepository
 import com.stler.money.data.repository.CategoryRepository
 import com.stler.money.data.repository.ExchangeRateRepository
-import com.stler.money.data.repository.ParsedDraft
-import com.stler.money.data.repository.TransactionDraftRepository
 import com.stler.money.data.repository.TransactionRepository
 import com.stler.money.sync.SyncManager
 import com.stler.money.ui.BaseViewModel
@@ -32,7 +30,6 @@ class SettingsViewModel @Inject constructor(
     private val exchangeRateRepository: ExchangeRateRepository,
     private val syncManager: SyncManager,
     private val syncQueueDao: SyncQueueDao,
-    private val draftRepository: TransactionDraftRepository,
 ) : BaseViewModel() {
 
     val spreadsheetName = authPreferences.spreadsheetName
@@ -83,21 +80,5 @@ class SettingsViewModel @Inject constructor(
         _savingCurrency.value = true
         exchangeRateRepository.setBaseCurrency(currency)
         _savingCurrency.value = false
-    }
-
-    /** Debug-only escape hatch (gated in the composable) to test the drafts UI end-to-end
-     * without a real notification or the parser — see dev plan Phase "notification drafts". */
-    fun insertTestDraft() = safeLaunch {
-        draftRepository.insertIfNotDuplicate(
-            ParsedDraft(
-                sourcePackage = "debug.test",
-                sourceLabel = "Test draft",
-                notificationKey = "debug-${System.currentTimeMillis()}",
-                textHash = "debug-${System.currentTimeMillis()}",
-                amount = 9.99,
-                currency = "EUR",
-                date = java.time.LocalDate.now().toString(),
-            ),
-        )
     }
 }
