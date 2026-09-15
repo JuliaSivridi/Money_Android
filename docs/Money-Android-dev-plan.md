@@ -810,6 +810,15 @@ this entry just tracks what shipped and what's still open.
   button). Per the user's explicit choice, the draft is only deleted after
   a real `Save` (`TransactionFormViewModel.save(..., draftId)`), never on
   Cancel or just by opening the form.
+- **Rescan button (§18.6)** — real gap the user hit: a payment notification
+  arrived while the phone wasn't plugged in for Logcat, so there was no way
+  to catch the raw text after the fact. `MoneyNotificationListenerService`
+  now keeps a `companion object` reference to its running instance and
+  exposes `rescanActiveNotifications()`, which re-processes whatever
+  `activeNotifications` still holds (not yet swiped away) through the same
+  `handle(sbn)` the live path uses — same parsing/logging/dedup either way.
+  New "Rescan current notifications" button in the Settings card (only
+  shown once access is granted).
 
 **Open / follow-up, not blocking this branch:**
 - All four parsers' amount-extraction is best-effort — no real notification

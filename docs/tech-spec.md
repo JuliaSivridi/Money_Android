@@ -1016,8 +1016,10 @@ Navigation section, no feature-flag switches (Money has nothing to disable):**
    (`NotificationManagerCompat.getEnabledListenerPackages` contains this
    app's package?) + a button opening
    `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`; rechecked on `ON_RESUME`
-   since the grant/revoke happens outside this screen. Debug builds only:
-   an extra "Add test draft" button that calls
+   since the grant/revoke happens outside this screen. When access is
+   granted, an additional "Rescan current notifications" button calls
+   `MoneyNotificationListenerService.rescanActiveNotifications()` — see
+   §18.6. Debug builds only: an extra "Add test draft" button that calls
    `TransactionDraftRepository.insertIfNotDuplicate` directly with fixed
    test data, bypassing the notification listener entirely — the intended
    way to exercise the drafts UI without a real notification.
@@ -1591,12 +1593,47 @@ prefill mechanism rather than adding a second one:
 - **Cancel**: unchanged, calls `onDismiss` directly — the draft is left
   untouched and reappears in the pending list.
 
-### 18.5 Getting a real Google Pay notification sample
+### 18.5 Getting a real notification sample
 
-No real sample was available while writing this feature. Once one comes
-through on-device, check Logcat for tag `MoneyNotificationListener` — it
-logs raw title/text for every notification from the whitelisted package,
-parse success or not — and use it to tighten `GooglePayParser`. Any
-notification from that package exercises the listener path, not
-necessarily a real payment (e.g. a card-added or weekly-summary
-notification); the parser then either extracts an amount or logs and skips.
+No real sample was available for any of the four parsers while writing
+this feature. Once one comes through on-device, check Logcat for tag
+`MoneyNotificationListener` — it logs raw title/text for every
+notification from a whitelisted package, parse success or not — and use it
+to tighten the corresponding parser. Any notification from a whitelisted
+package exercises the listener path, not necessarily a real payment (e.g.
+a card-added or weekly-summary notification); the parser then either
+extracts an amount or logs and skips.
+
+**Catching one after the fact** — the original problem with the above:
+Logcat has to already be attached (phone plugged into the computer) at the
+exact moment the notification arrives, which real payments don't wait for.
+`onNotificationPosted` only ever fires live, and by the time you notice a
+transaction happened, the notification itself may already be gone from the
+history buffer — see §18.6 for the "phone wasn't plugged in in time" case.
+
+### 18.6 Rescanning notifications still in the shade
+
+Real gap the user hit: a payment notification arrived while the phone
+wasn't connected for Logcat, so `onNotificationPosted`'s log line was lost,
+and by the time she went looking it was too late to attach and watch it
+happen. `NotificationListenerService.getActiveNotifications()` (exposed as
+the `activeNotifications` property) returns whatever's still visible in
+the notification shade for a *connected* listener — i.e. anything not yet
+swiped away — regardless of whether `onNotificationPosted` already fired
+for it. `MoneyNotificationListenerService` keeps a `companion object`
+reference to its own running instance (set in `onListenerConnected`,
+cleared in `onListenerDisconnected`/`onDestroy` — the standard way to reach
+a bound `NotificationListenerService` from outside itself, since there's
+no other handle to it) and exposes `rescanActiveNotifications(): Boolean`.
+Both the live (`onNotificationPosted`) and rescan paths funnel through the
+same private `handle(sbn)` — identical parsing, logging, and dedup either
+way, so re-running a rescan is always safe (an already-created draft for
+the same notification is skipped, same as a live duplicate).
+
+The "Rescan current notifications" button in the SettingsScreen card (§8.6)
+calls this directly and shows a snackbar: success ("Rescanned…") or, if the
+listener isn't connected yet (access just granted, OS hasn't bound the
+service in this process), a message asking to try again shortly. This
+doesn't help once a notification has actually been swiped away or the
+system has otherwise cleared it — at that point only the Logcat capture in
+§18.5 (if it happened to be running) has the text.

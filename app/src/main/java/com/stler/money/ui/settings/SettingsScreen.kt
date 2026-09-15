@@ -47,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +62,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stler.money.BuildConfig
+import com.stler.money.notifications.MoneyNotificationListenerService
 import com.stler.money.ui.theme.ControlShape
+import kotlinx.coroutines.launch
 
 private val CURRENCIES = listOf("EUR", "USD", "RUB")
 
@@ -91,6 +94,7 @@ fun SettingsScreen(
     // full-screen overlay on top of MainScreen's own Scaffold, which would hide that Scaffold's
     // snackbar host behind it.
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     LaunchedEffect(viewModel) {
         viewModel.uiError.collect { message -> snackbarHostState.showSnackbar(message) }
     }
@@ -285,7 +289,7 @@ fun SettingsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Bank notifications", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (notificationAccessGranted) "Access granted — suggesting drafts from Google Pay" else "Suggest transaction drafts from Google Pay notifications",
+                                if (notificationAccessGranted) "Access granted — suggesting drafts from Google Pay, Wise, Revolut, S-Pankki" else "Suggest transaction drafts from Google Pay, Wise, Revolut, S-Pankki notifications",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -297,6 +301,27 @@ fun SettingsScreen(
                         shape = ControlShape,
                     ) {
                         Text(if (notificationAccessGranted) "Manage access" else "Grant access")
+                    }
+
+                    if (notificationAccessGranted) {
+                        Spacer(Modifier.height(4.dp))
+                        // For a notification that was missed live (app not running yet, a
+                        // brief listener hiccup) — re-reads whatever's still in the shade,
+                        // not yet swiped away, instead of requiring the original moment.
+                        OutlinedButton(
+                            onClick = {
+                                val triggered = MoneyNotificationListenerService.rescanActiveNotifications()
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        if (triggered) "Rescanned notifications still in the shade"
+                                        else "Notification access not connected yet — try again in a moment",
+                                    )
+                                }
+                            },
+                            shape = ControlShape,
+                        ) {
+                            Text("Rescan current notifications")
+                        }
                     }
 
                     if (BuildConfig.DEBUG) {
