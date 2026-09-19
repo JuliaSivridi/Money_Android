@@ -635,9 +635,14 @@ fixed above.
       `exitTransition`/`popEnterTransition`/`popExitTransition` to a
       700ms cross-fade (confirmed in the library's own source, version
       2.9.0) when none of the four are specified; this app never
-      overrode them. Fixed by setting all four to `EnterTransition.None`/
-      `ExitTransition.None` on `MainScreen.kt`'s `NavHost` call — instant
-      destination changes, no animation.
+      overrode them. First attempt — all four set to
+      `EnterTransition.None`/`ExitTransition.None` — made it *worse*, not
+      better: with nothing to blend the swap, the outgoing screen's
+      content briefly overlapped the incoming one, and any transient
+      shimmer/loading state on the incoming screen flashed visibly
+      instead of being masked by a fade. Settled on a short 120ms
+      `fadeIn`/`fadeOut` for all four instead — fast enough not to read as
+      lag, still enough to cover the overlap.
 
 ---
 

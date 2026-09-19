@@ -1,7 +1,8 @@
 package com.stler.money.ui.main
 
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -282,15 +283,17 @@ fun MainScreen(
                 startDestination = Screen.TRANSACTIONS,
                 modifier = Modifier.padding(innerPadding),
                 // NavHost's own default is a 700ms cross-fade on every destination change
-                // (androidx.navigation.compose 2.9's NavHost.kt) — on bottom-nav tab
-                // switches between already-composed screens with their own data loads,
-                // that reads as sluggish rather than a real animation. No transition at
-                // all instead, same as this app had before Navigation Compose started
-                // defaulting to one.
-                enterTransition = { EnterTransition.None },
-                exitTransition = { ExitTransition.None },
-                popEnterTransition = { EnterTransition.None },
-                popExitTransition = { ExitTransition.None },
+                // (androidx.navigation.compose 2.9's NavHost.kt), which read as sluggish.
+                // Going all the way to EnterTransition.None/ExitTransition.None (tried
+                // first) was worse, not better: with no fade at all, AnimatedContent has
+                // nothing to hide the swap behind, so the outgoing screen's content (and
+                // any transient loading/shimmer state on the incoming one) is visibly
+                // exposed for a frame or two instead of blending smoothly. A short 120ms
+                // fade is fast enough not to feel like lag but still covers that overlap.
+                enterTransition = { fadeIn(animationSpec = tween(120)) },
+                exitTransition = { fadeOut(animationSpec = tween(120)) },
+                popEnterTransition = { fadeIn(animationSpec = tween(120)) },
+                popExitTransition = { fadeOut(animationSpec = tween(120)) },
             ) {
                 composable(
                     route = Screen.TRANSACTIONS,
