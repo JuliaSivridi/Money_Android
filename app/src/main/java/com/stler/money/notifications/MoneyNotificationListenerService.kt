@@ -1,6 +1,8 @@
 package com.stler.money.notifications
 
 import android.app.Notification
+import android.content.ComponentName
+import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -93,10 +95,23 @@ class MoneyNotificationListenerService : NotificationListenerService() {
         // NotificationListenerService — there's no other handle to it once bound.
         @Volatile private var instance: MoneyNotificationListenerService? = null
 
-        /** Returns false (nothing to trigger) when notification access isn't currently
-         * connected — not granted yet, or the OS hasn't bound the service in this process. */
-        fun rescanActiveNotifications(): Boolean {
-            val service = instance ?: return false
+        /**
+         * Returns false when notification access isn't currently *connected* — which is not
+         * the same thing as not granted: Android (MIUI especially) can silently drop the live
+         * binding to a NotificationListenerService without revoking the permission itself, so
+         * system settings can show access as granted while this is still null. When that
+         * happens, [NotificationListenerService.requestRebind] asks the system to reconnect —
+         * the same effect as the user manually toggling the permission off and on, but without
+         * leaving the app. Reconnecting is asynchronous ([onListenerConnected] fires later), so
+         * this call still returns false right after requesting it; a later rescan (the next
+         * app open, or tapping the button again) picks it up once the rebind has landed.
+         */
+        fun rescanActiveNotifications(context: Context): Boolean {
+            val service = instance
+            if (service == null) {
+                NotificationListenerService.requestRebind(ComponentName(context, MoneyNotificationListenerService::class.java))
+                return false
+            }
             service.rescan()
             return true
         }

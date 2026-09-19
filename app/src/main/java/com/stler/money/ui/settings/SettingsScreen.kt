@@ -304,16 +304,17 @@ fun SettingsScreen(
 
                     if (notificationAccessGranted) {
                         Spacer(Modifier.height(8.dp))
-                        // For a notification that was missed live (app not running yet, a
-                        // brief listener hiccup) — re-reads whatever's still in the shade,
-                        // not yet swiped away, instead of requiring the original moment.
+                        // MainActivity.onResume() already does this automatically on every
+                        // app open — this button is the manual fallback for while the app is
+                        // already open, or to force a reconnect attempt (see
+                        // rescanActiveNotifications) without leaving the app.
                         OutlinedButton(
                             onClick = {
-                                val triggered = MoneyNotificationListenerService.rescanActiveNotifications()
+                                val triggered = MoneyNotificationListenerService.rescanActiveNotifications(context)
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar(
                                         if (triggered) "Rescanned notifications still in the shade"
-                                        else "Notification access not connected yet — try again in a moment",
+                                        else "Reconnecting to notification access — try Rescan again in a moment",
                                     )
                                 }
                             },

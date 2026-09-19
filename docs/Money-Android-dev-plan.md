@@ -913,6 +913,25 @@ on Round 3's account-mapping feature:**
   all, since each independently resolves straight to that Account and any
   simultaneous duplicate still collapses into one draft.
 
+**Round 5 — automatic rescan on app open, plus a dropped-listener-binding fix:**
+- `MainActivity.onResume()` now calls `rescanActiveNotifications()`
+  unconditionally and silently on every app open (cold start or returning
+  from background) — the manual Settings button alone required going out
+  of the way to trigger it after the fact, which doesn't fit "pay in a
+  physical store, open the app afterward to add the transaction" (no
+  Logcat, no way to watch it happen live).
+- Real Android quirk hit on-device: notification access can show as
+  *granted* in system settings while the listener's actual live binding
+  has been silently dropped by the OS (observed requiring a manual
+  toggle-off/toggle-on to recover) — permission and connection are
+  different things. `rescanActiveNotifications` now calls
+  `NotificationListenerService.requestRebind(ComponentName)` whenever its
+  instance reference is null, the platform API for asking the system to
+  reconnect programmatically (same effect as the manual toggle, without
+  leaving the app). Reconnecting is asynchronous, so the triggering call
+  still reports "not connected" — a subsequent rescan (the next
+  `onResume`, in practice) is what actually benefits.
+
 **Open / follow-up, not blocking this branch:**
 - All four parsers' amount-extraction is best-effort — no real notification
   sample was available for any of them while writing this. Every

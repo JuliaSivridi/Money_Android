@@ -1746,10 +1746,35 @@ same private `handle(sbn)` — identical parsing, logging, and dedup either
 way, so re-running a rescan is always safe (an already-created draft for
 the same notification is skipped, same as a live duplicate).
 
-The "Rescan current notifications" button in the SettingsScreen card (§8.6)
-calls this directly and shows a snackbar: success ("Rescanned…") or, if the
-listener isn't connected yet (access just granted, OS hasn't bound the
-service in this process), a message asking to try again shortly. This
-doesn't help once a notification has actually been swiped away or the
-system has otherwise cleared it — at that point only the Logcat capture in
-§18.5 (if it happened to be running) has the text.
+**Automatic, on every app open:** `MainActivity.onResume()` calls
+`rescanActiveNotifications()` unconditionally and silently (no snackbar —
+the drafts list/badge itself is the feedback) — this covers both a fresh
+cold start and returning from the background, i.e. the normal "pay, then
+later open the app to add the transaction" flow, without requiring the
+user to have gone to Settings at all.
+
+**Manual fallback:** the "Rescan current notifications" button in the
+SettingsScreen card (§8.6) calls the same function and shows a snackbar
+with the outcome — useful while the app is already open, or to retry
+after the reconnect described below.
+
+**Reconnecting a dropped listener binding:** notification access being
+*granted* (the system permission) and the listener actually being
+*connected* (a live binding the OS can, and on some devices routinely
+does, drop without revoking the permission) are different things.
+`rescanActiveNotifications` returns false whenever its instance reference
+is null — either access was never granted, or it was granted but the
+binding has silently lapsed. In the latter case it also calls
+`NotificationListenerService.requestRebind(ComponentName)`, the platform
+API for asking the system to reconnect a listener service — the
+programmatic equivalent of the user manually toggling access off and on
+in system settings, without leaving the app. Reconnecting happens
+asynchronously (`onListenerConnected` fires later on its own schedule), so
+the call that triggered it still reports false; a later rescan — the next
+app open being the common case, since it happens on every `onResume` — is
+what actually picks up notifications once the rebind has landed.
+
+None of this helps once a notification has actually been swiped away or
+the system has otherwise cleared it from the shade — at that point only
+the Logcat capture in §18.5 (if it happened to be running at the time) has
+the text.
