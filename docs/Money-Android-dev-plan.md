@@ -629,6 +629,15 @@ fixed above.
 - [x] App launcher icon — replaced with a real vector port of Money PWA's
       own icon (see the accessibility-pass entry above for the scale
       correction that followed).
+- [x] Bottom-nav tab switches (and all other `NavHost` destination changes)
+      read as sluggish, not like a real animation — root cause:
+      `androidx.navigation.compose`'s `NavHost` defaults `enterTransition`/
+      `exitTransition`/`popEnterTransition`/`popExitTransition` to a
+      700ms cross-fade (confirmed in the library's own source, version
+      2.9.0) when none of the four are specified; this app never
+      overrode them. Fixed by setting all four to `EnterTransition.None`/
+      `ExitTransition.None` on `MainScreen.kt`'s `NavHost` call — instant
+      destination changes, no animation.
 
 ---
 

@@ -1226,6 +1226,14 @@ to the tab (via the bottom nav item itself) doesn't reapply a stale filter.
   via early return — no NavBackStack entries, identical to Tasks Android.
 - `TransactionFormSheet` / `AccountFormSheet` / `CategoryFormSheet`
   (`ModalBottomSheet`) are local overlays, not navigation destinations.
+- `NavHost`'s `enterTransition`/`exitTransition`/`popEnterTransition`/
+  `popExitTransition` are all set to `EnterTransition.None`/
+  `ExitTransition.None` — explicit, not the library default. Navigation
+  Compose 2.9's own default is a 700ms cross-fade on every destination
+  change when none of the four are specified; on tab switches between
+  already-composed screens with their own data loads, that read as
+  sluggish rather than an actual animation, so it's disabled entirely
+  instead of tuned.
 
 ### Deeplinks — decided against
 
