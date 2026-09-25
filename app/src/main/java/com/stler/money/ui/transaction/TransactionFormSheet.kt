@@ -143,8 +143,13 @@ fun TransactionFormSheet(
     // firstOrNull, not first — a non-empty list where every account happens to be archived
     // (e.g. right after archiving the last active one) threw NoSuchElementException here;
     // falling back to accounts.first() in that case still gives a real, pickable account.
+    // Skipped for a draft (draftId != null): a blank accountId there means the notification
+    // source genuinely didn't resolve to one account (unmapped or ambiguous — see
+    // TransactionDraftRepositoryImpl), and silently picking "the first account" made it look
+    // like the bank had been recognized when it hadn't. Save stays disabled (canSave) until
+    // she picks one explicitly.
     LaunchedEffect(accounts) {
-        if (accountId.isBlank() && accounts.isNotEmpty()) {
+        if (accountId.isBlank() && accounts.isNotEmpty() && draftId == null) {
             accountId = (accounts.firstOrNull { !it.archived } ?: accounts.first()).id
         }
     }

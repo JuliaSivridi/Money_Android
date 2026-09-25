@@ -794,16 +794,24 @@ transaction" text button.
 screen. Row layout mirrors a real `TransactionRow` exactly (icon | title +
 second line | amount alone on the right — not a second right-side line):
 dimmed icon + suggested-category name as the title (muted, since it's a
-guess, not a confirmed category), and a full-brightness second line in the
-same place a real row's time·account line sits — the resolved `Account`'s
-name once known (§18.2), falling back to the raw source label ("Wise",
-"Google Pay", …) while unresolved — plus the amount at full brightness on
-the right with nothing else beside it. A `DraftsButton` next to the filter
-icon in `MoneyTopAppBar` (shown only when there's at least one pending draft)
-toggles the list to show only drafts; this is purely a display toggle on
-already-fetched data, unrelated to `TransactionFilterState`/`FilterMenu`,
-which stays scoped to real, persisted transactions. Tapping a draft row
-opens `TransactionFormSheet` pre-filled from it (see §18).
+guess, not a confirmed category), and a `time · account` second line in the
+same place a real row's own time·account line sits — `time` is when the
+notification was captured (`TransactionDraftEntity.createdAt`, dimmed,
+display-only — a confirmed transaction always stamps the real moment of
+Save instead, never this), and `account` is the resolved `Account`'s name
+in *that account's own color* (§18.2), not a generic gray — a resolved
+draft should read as confidently known, not just another muted line. When
+unresolved, this shows a neutral dimmed "Unrecognized source" instead of
+the parser's raw app label ("Google Pay", "Wise", …) — the app label
+previously shown there read as if the bank had been recognized when it
+hadn't (see §18.4's account-prefill fix, which has the same root cause).
+Amount stays at full brightness on the right with nothing else beside it.
+A `DraftsButton` next to the filter icon in `MoneyTopAppBar` (shown only
+when there's at least one pending draft) toggles the list to show only
+drafts; this is purely a display toggle on already-fetched data, unrelated
+to `TransactionFilterState`/`FilterMenu`, which stays scoped to real,
+persisted transactions. Tapping a draft row opens `TransactionFormSheet`
+pre-filled from it (see §18).
 
 ---
 
@@ -1682,6 +1690,33 @@ No debug-only test-draft button any more — removed once the feature was
 confirmed working on-device; `recordNotification` is exercised for real
 by the notification listener and the rescan path (§18.6) now.
 
+The card also shows `MoneyNotificationListenerService.isConnected()` —
+granted-but-disconnected is a real, recurring state on some devices (§18.6)
+and is surfaced distinctly (error-colored subtitle) rather than folded into
+the same "granted" message, since a granted-looking card previously gave no
+hint that nothing was actually being captured. When disconnected, two
+best-effort buttons appear (hidden otherwise, to keep the card clean while
+everything's working):
+
+- **"Disable battery restrictions for this app"** — the standard
+  `PowerManager.isIgnoringBatteryOptimizations`/
+  `Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` exemption flow (a
+  real, documented Android API; requires the
+  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` manifest permission, which itself
+  grants nothing on its own — it only unlocks showing this system prompt).
+- **"Open autostart settings (Xiaomi/MIUI)"** — launches
+  `com.miui.securitycenter`'s `AutoStartManagementActivity` directly, the
+  widely-used but *undocumented* activity Xiaomi ships for its own
+  autostart permission screen (there is no public API for this). Wrapped in
+  `runCatching`, falling back to the app's own
+  `ACTION_APPLICATION_DETAILS_SETTINGS` screen if that component doesn't
+  exist (non-MIUI devices, or a MIUI version that's changed/removed it).
+
+Neither is guaranteed to fully stop the OS from killing the listener —
+MIUI's own background-app management can still act on top of both — this
+is a best-effort mitigation for a well-known, OEM-specific class of
+problem, not a proven fix.
+
 ### 18.4 Confirming a draft — reuses `copyFrom`, not a parallel prefill path
 
 Opening a draft calls `TransactionFormSheet` with a new `draftId: String?`
@@ -1709,8 +1744,15 @@ prefill mechanism rather than adding a second one:
   (§18.1's `recordNotification`) — `toPrefillTransaction` just carries
   `draft.accountId` straight into the prefill. When it's blank (no
   configured Account recognizes the source, or more than one does and
-  nothing corroborated it), the form falls back to its own normal
-  default-account behavior, same as a plain create.
+  nothing corroborated it), the form's normal default-account behavior
+  (auto-picking the first non-archived Account whenever nothing's selected
+  once accounts load) is deliberately **skipped** for a draft — tried the
+  other way first, and a silently auto-picked account made an unresolved
+  draft look exactly like a resolved one, both in the row (fixed above) and
+  in the form's own account field, which is worse than just asking: `Save`
+  already stays disabled (`canSave`) until an account is chosen, so leaving
+  it blank costs nothing but an extra tap and avoids picking the wrong
+  account outright.
 - **Delete button**, only shown when `draftId != null` and no `isEdit`
   (no Copy button in that case — nothing to copy from yet): discards the
   draft, does not touch the balance (it never touched it).
@@ -1759,11 +1801,18 @@ way, so re-running a rescan is always safe (an already-created draft for
 the same notification is skipped, same as a live duplicate).
 
 **Automatic, on every app open:** `MainActivity.onResume()` calls
-`rescanActiveNotifications()` unconditionally and silently (no snackbar —
-the drafts list/badge itself is the feedback) — this covers both a fresh
+`rescanActiveNotifications()` unconditionally — this covers both a fresh
 cold start and returning from the background, i.e. the normal "pay, then
 later open the app to add the transaction" flow, without requiring the
-user to have gone to Settings at all.
+user to have gone to Settings at all. Silent when it succeeds or access was
+never granted (the drafts list/badge is the feedback); when access *is*
+granted but the call reports disconnected, a `Toast` says so directly —
+tried fully silent first (matching the original "no snackbar" intent
+above), but on a device where the OS drops the binding repeatedly, silence
+meant the only way to notice was Logcat or digging into Settings, neither
+practical right after paying in a store. The Toast is purely informational
+(a rebind was already requested by the same call); persisting disconnects
+despite that are what the two buttons in §18.3 are for.
 
 **Manual fallback:** the "Rescan current notifications" button in the
 SettingsScreen card (§8.6) calls the same function and shows a snackbar

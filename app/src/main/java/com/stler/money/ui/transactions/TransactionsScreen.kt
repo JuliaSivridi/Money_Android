@@ -49,6 +49,7 @@ import com.stler.money.ui.util.ShimmerListPlaceholder
 import com.stler.money.ui.theme.expenseTextColor
 import com.stler.money.ui.theme.incomeTextColor
 import com.stler.money.util.formatAmount
+import com.stler.money.util.formatInstantHHMM
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -152,12 +153,18 @@ fun TransactionsScreen(
 /**
  * A pending notification-derived draft, mixed into the same list as real transactions
  * (per Julia's request — not a separate screen). Icon/category name are dimmed (there is
- * no confirmed category yet, just a best-guess suggestion); amount and source ("bank")
- * stay full-brightness, same as a real row.
+ * no confirmed category yet, just a best-guess suggestion); amount and the resolved
+ * account stay full-brightness, same as a real row. The account's own color is used for
+ * the account name (matches TransactionRow) — a resolved bank reads as confidently known,
+ * not just another gray line. When the source is genuinely unresolved/ambiguous, the
+ * parser's app label ("Google Pay") is deliberately NOT shown — it's the wallet app, not
+ * the bank, and showing it read as if the bank had been recognized when it hadn't.
  */
 @Composable
 private fun DraftRow(draft: TransactionDraft, account: Account?, suggestedCategory: Category?, onClick: () -> Unit) {
     val containerSize = IconSizes.lg + 12.dp
+    val accountColor = account?.color
+        ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -186,11 +193,25 @@ private fun DraftRow(draft: TransactionDraft, account: Account?, suggestedCatego
                 text = suggestedCategory?.name ?: "Uncategorized",
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
             )
-            // Second line matches a real row's time·account line — full brightness, not
-            // dimmed, same as the amount (only the icon/category hint above is muted).
-            // Shows the resolved account's name once known, falling back to the raw
-            // source label ("Wise", "Google Pay", …) while it's still unresolved.
-            Text(account?.name ?: draft.sourceLabel, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Mirrors TransactionRow's "time · account" line: dim time, then the account in
+            // its own color once resolved. Time here is when the notification was captured
+            // (display-only) — a confirmed transaction always stamps the real Save moment
+            // instead (TransactionFormSheet/buildResult), not this one.
+            Text(
+                text = buildAnnotatedString {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                        append("${formatInstantHHMM(draft.createdAt)} · ")
+                    }
+                    if (account != null && accountColor != null) {
+                        withStyle(SpanStyle(color = accountColor)) { append(account.name) }
+                    } else {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))) {
+                            append("Unrecognized source")
+                        }
+                    }
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
         Text(formatAmount(draft.amount, draft.currency), style = MaterialTheme.typography.bodyLarge)
     }

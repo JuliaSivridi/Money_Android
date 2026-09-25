@@ -33,5 +33,6 @@ fun TransactionDraftEntity.toDomain() = TransactionDraft(
     amount = amount,
     currency = currency,
     date = date,
+    createdAt = createdAt,
     accountId = accountId,
 )

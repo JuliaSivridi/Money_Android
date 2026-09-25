@@ -1,6 +1,10 @@
 package com.stler.money.ui.settings
 
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -261,14 +265,21 @@ fun SettingsScreen(
             var notificationAccessGranted by remember {
                 mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName))
             }
+            // Distinct from the permission above — Android (MIUI especially) can silently
+            // drop the live binding without revoking access, so "granted" alone isn't enough
+            // to tell her whether drafts are actually being captured right now. See
+            // MoneyNotificationListenerService's class doc.
+            var listenerConnected by remember { mutableStateOf(MoneyNotificationListenerService.isConnected()) }
             val lifecycleOwner = LocalLifecycleOwner.current
             DisposableEffect(lifecycleOwner) {
                 // The grant/revoke happens in system Settings, outside this screen — recheck
-                // whenever the user comes back to it (e.g. after toggling access there).
+                // whenever the user comes back to it (e.g. after toggling access there, or a
+                // rebind MainActivity.onResume already triggered on the way back here).
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
                         notificationAccessGranted =
                             NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+                        listenerConnected = MoneyNotificationListenerService.isConnected()
                     }
                 }
                 lifecycleOwner.lifecycle.addObserver(observer)
@@ -287,9 +298,17 @@ fun SettingsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Access to Android notifications", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (notificationAccessGranted) "Access granted — suggesting drafts from Google Pay or banks" else "Suggest transaction drafts from Google Pay or bank notifications",
+                                when {
+                                    !notificationAccessGranted -> "Suggest transaction drafts from Google Pay or bank notifications"
+                                    listenerConnected -> "Access granted — suggesting drafts from Google Pay or banks"
+                                    else -> "Access granted, but disconnected right now — the system dropped it. Reconnecting…"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (notificationAccessGranted && !listenerConnected) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
                         }
                     }
@@ -311,6 +330,7 @@ fun SettingsScreen(
                         OutlinedButton(
                             onClick = {
                                 val triggered = MoneyNotificationListenerService.rescanActiveNotifications(context)
+                                listenerConnected = triggered
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar(
                                         if (triggered) "Rescanned notifications still in the shade"
@@ -322,6 +342,50 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text("Rescan current notifications")
+                        }
+                    }
+
+                    // Rebinding (above) fixes a one-off drop, but on some devices (MIUI in
+                    // particular) the system kills the listener repeatedly because of its own
+                    // battery/background-app management — these two are best-effort ways to
+                    // exempt the app from that, shown only once a drop has actually been seen
+                    // so the card stays clean while everything's working. Neither is
+                    // guaranteed: standard battery-optimization exemption is a real Android
+                    // API, but MIUI's autostart screen has no public API — the intent below is
+                    // the widely-used but undocumented activity Xiaomi ships, so it's wrapped
+                    // in a try/catch and falls back to the app's own info screen if MIUI ever
+                    // changes or removes it.
+                    if (notificationAccessGranted && !listenerConnected) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val powerManager = context.getSystemService(PowerManager::class.java)
+                                val intent = if (powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true) {
+                                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                } else {
+                                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
+                                }
+                                runCatching { context.startActivity(intent) }
+                            },
+                            shape = ControlShape,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Disable battery restrictions for this app")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val autostartIntent = Intent().setComponent(
+                                    ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+                                )
+                                val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                                runCatching { context.startActivity(autostartIntent) }
+                                    .onFailure { if (it is ActivityNotFoundException) runCatching { context.startActivity(fallbackIntent) } }
+                            },
+                            shape = ControlShape,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Open autostart settings (Xiaomi/MIUI)")
                         }
                     }
                 }

@@ -11,6 +11,9 @@ data class TransactionDraft(
     val amount: Double,
     val currency: String,
     val date: String, // ISO "YYYY-MM-DD"
+    /** ISO instant this draft was captured — display-only (see DraftRow); never carried into
+     * a confirmed Transaction's `time`, which always uses the real moment of Save instead. */
+    val createdAt: String,
     /** Resolved Account id, or blank if none/ambiguous — see TransactionDraftRepository. */
     val accountId: String = "",
 )

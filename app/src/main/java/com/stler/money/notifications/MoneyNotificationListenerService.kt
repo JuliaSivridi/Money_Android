@@ -115,5 +115,9 @@ class MoneyNotificationListenerService : NotificationListenerService() {
             service.rescan()
             return true
         }
+
+        /** True only while the listener is actually bound right now — see the class doc on
+         * [rescanActiveNotifications] for why this can be false even with access granted. */
+        fun isConnected(): Boolean = instance != null
     }
 }

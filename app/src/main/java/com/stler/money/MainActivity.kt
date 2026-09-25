@@ -1,6 +1,7 @@
 package com.stler.money
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -10,6 +11,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.core.app.NotificationManagerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stler.money.notifications.MoneyNotificationListenerService
@@ -57,11 +59,22 @@ class MainActivity : ComponentActivity() {
 
     // Covers both the case that mattered to the user (pay in a store with no way to watch
     // Logcat live, open the app afterward to add the transaction) and a fresh cold start —
-    // onResume fires after onCreate too. Silent: no snackbar, the drafts list/badge itself
-    // is the feedback. Also nudges a rebind (see rescanActiveNotifications) if the listener
-    // isn't currently connected, so the *next* open picks up whatever this one missed.
+    // onResume fires after onCreate too. If the listener isn't connected, this also nudges a
+    // rebind (see rescanActiveNotifications) — but a rebind is asynchronous, so *this* open
+    // still can't have scanned anything. MIUI in particular can drop the binding again and
+    // again with no in-app signal otherwise (the only prior feedback was Settings or Logcat,
+    // neither of which she can check at the register) — a Toast here is the visible signal
+    // that something needs attention, shown only when access is actually granted (an
+    // unconnected listener because she never turned it on isn't worth nagging about).
     override fun onResume() {
         super.onResume()
-        MoneyNotificationListenerService.rescanActiveNotifications(this)
+        val connected = MoneyNotificationListenerService.rescanActiveNotifications(this)
+        if (!connected && NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)) {
+            Toast.makeText(
+                this,
+                "Notification access was dropped by the system — reconnecting… check Settings if this keeps happening",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 }

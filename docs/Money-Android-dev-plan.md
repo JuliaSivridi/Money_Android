@@ -946,6 +946,44 @@ on Round 3's account-mapping feature:**
   still reports "not connected" — a subsequent rescan (the next
   `onResume`, in practice) is what actually benefits.
 
+**Round 6 — on-device feedback after more testing: reliability signal, draft-row time/color, and a real account-resolution bug:**
+- Round 5's rebind fix wasn't enough on its own — the listener binding kept
+  dropping repeatedly, with no visible signal that it had (the automatic
+  rescan was silent by design, and Logcat isn't practical to check right
+  after paying in a store). `MainActivity.onResume()` now shows a `Toast`
+  when access is granted but the rescan reports disconnected — informational
+  only, a rebind was already requested by the same call. The SettingsScreen
+  card also now shows `MoneyNotificationListenerService.isConnected()`
+  distinctly from "access granted" (error-colored subtitle when granted but
+  disconnected), plus two best-effort buttons shown only in that state:
+  standard battery-optimization exemption (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`,
+  needs the `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` manifest permission —
+  requesting it just unlocks the prompt, grants nothing by itself) and
+  MIUI's undocumented autostart screen (`com.miui.securitycenter`'s
+  `AutoStartManagementActivity`, wrapped in `runCatching` with a fallback to
+  the app's own info screen). Neither is guaranteed — this is a best-effort
+  mitigation for a known OEM-specific (MIUI) background-restriction problem,
+  not a proven fix; if it turns out not to help, the branch itself is in
+  question.
+- Draft row: added a dimmed `time` (`TransactionDraftEntity.createdAt`,
+  when the notification was captured) to the previously time-less second
+  line, matching a real row's `time · account` shape — display-only, never
+  fed into a confirmed transaction's own `time` (that always stamps the
+  real Save moment, unchanged from the earlier fix). The account name, once
+  resolved, is now shown in that account's own color (matching
+  `TransactionRow`) instead of generic gray.
+- Real bug, not just a labeling nitpick: a draft with an unresolved/ambiguous
+  `accountId` (blank) *looked* resolved once the form opened, because
+  `TransactionFormSheet`'s existing "default to the first account once the
+  list loads" effect ran unconditionally — including for a draft, silently
+  picking the wrong account rather than the right one. The row itself had
+  the same symptom, falling back to the parser's raw app label ("Google
+  Pay") as if that were the recognized bank. Both fixed: the row now shows a
+  neutral dimmed "Unrecognized source" instead of the app label, and the
+  form's auto-default is skipped specifically when `draftId != null`, so an
+  unresolved draft now honestly requires picking an account by hand (`Save`
+  was already disabled until one's chosen, so this costs nothing but a tap).
+
 **Open / follow-up, not blocking this branch:**
 - All four parsers' amount-extraction is best-effort — no real notification
   sample was available for any of them while writing this. Every
@@ -957,6 +995,11 @@ on Round 3's account-mapping feature:**
   actual underlying bank/card charged — Google Wallet aggregates multiple
   cards. Extracting the real one (if even present in the notification
   text) is part of the same follow-up above, not solvable without a
-  sample.
+  sample. The account-resolution mapping (§18.1) is unrelated to this and
+  already works from the explicit per-Account configuration, not from
+  parsing a bank name out of the text.
 - Not yet merged to `main` — stays on `feature/notification-drafts` until
-  stable, per the user's explicit branching request.
+  stable, per the user's explicit branching request. Round 6's reliability
+  mitigations are best-effort; if the listener binding still doesn't hold up
+  after trying them, that's the real signal for whether this branch is
+  viable at all, not just another bug to patch.
