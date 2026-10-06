@@ -788,9 +788,10 @@ a code fix, not a test.
   Analytics aggregation running in composition — real but low-priority for a
   personal-scale dataset; unchanged.
 
-## Phase 14 — Notification-Derived Transaction Drafts (branch `feature/notification-drafts`)
+## Phase 14 — Notification-Derived Transaction Drafts
 
-Warm-up feature, not merged to `main` yet. Full design in tech spec §18 —
+Warm-up feature, developed on `feature/notification-drafts` and since merged
+to `main` (released in v1.2; branch deleted). Full design in tech spec §18 —
 this entry just tracks what shipped and what's still open.
 
 **Shipped:**
@@ -1020,8 +1021,7 @@ on Round 3's account-mapping feature:**
   sample. The account-resolution mapping (§18.1) is unrelated to this and
   already works from the explicit per-Account configuration, not from
   parsing a bank name out of the text.
-- Not yet merged to `main` — stays on `feature/notification-drafts` until
-  stable, per the user's explicit branching request. Round 6's reliability
-  mitigations are best-effort; if the listener binding still doesn't hold up
-  after trying them, that's the real signal for whether this branch is
-  viable at all, not just another bug to patch.
+- Merged to `main` (v1.2) after on-device testing confirmed the listener
+  connection holds with Round 6's mitigations. Those mitigations are
+  best-effort for an OEM-specific (MIUI) problem — if drops come back, that's
+  a platform limit to weigh, not just another bug to patch.

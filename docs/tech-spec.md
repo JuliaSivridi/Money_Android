@@ -203,7 +203,8 @@ com.stler.money/
 ├── data/
 │   ├── local/
 │   │   ├── dao/              TransactionDao, AccountDao, CategoryDao, SyncQueueDao,
-│   │   │                      TransactionDraftDao
+│   │   │                      TransactionDraftDao, AccountNotificationSourceDao,
+│   │   │                      ProcessedNotificationDao (last three: local-only, §18)
 │   │   ├── entity/            Room entities + toDomain() / toEntity() mappers
 │   │   └── MoneyDatabase.kt   RoomDatabase, migration objects
 │   ├── remote/
@@ -226,16 +227,19 @@ com.stler.money/
 ├── notifications/               NotificationParser (Strategy), NotificationParserRegistry
 │   │                              (whitelist), MoneyNotificationListenerService,
 │   │                              MoneyAmountExtractor — see §18
-│   └── parsers/                  GooglePayParser, one per whitelisted source
+│   └── parsers/                  GooglePayParser, WiseParser, RevolutParser,
+│                                  SPankkiParser — one per whitelisted source
 ├── sync/
 │   ├── SyncState.kt            Sealed class: Idle / Syncing / Pending(count)
 │   ├── SyncManager.kt          WorkManager scheduling + syncState Flow
 │   └── SyncWorker.kt           Push + pull
 ├── ui/
 │   ├── auth/                   AuthScreen, AuthViewModel, AuthUiState
-│   ├── main/                   MainScreen, MainViewModel, MoneyTopAppBar
+│   ├── main/                   MainScreen, MainViewModel, MoneyTopAppBar,
+│   │                             AboutScreen + AboutViewModel (in-app update, §14)
 │   ├── transactions/            TransactionsScreen + ViewModel, FilterMenu
-│   ├── accounts/                AccountsScreen + ViewModel, AccountFormSheet
+│   ├── accounts/                AccountsScreen + ViewModel, AccountFormSheet,
+│   │                              NotificationSourcePickerSheet (§18.2)
 │   ├── categories/              CategoriesScreen (drag-reorder) + ViewModel, CategoryFormSheet
 │   ├── analytics/                AnalyticsScreen + ViewModel, MonthBarChart, YearlyChart,
 │   │                              MonthlyView, CategoryDonut
@@ -248,6 +252,8 @@ com.stler.money/
 │   ├── navigation/                Screen.kt (route constants)
 │   ├── theme/                     Color.kt, Theme.kt, Type.kt
 │   └── util/                       EmptyState, ShimmerTransactionList, ErrorSnackbarEffect
+├── util/                       CurrencyFormat (formatAmount), Ids (generateId),
+│                                TimeFormat (currentTimeHHMM, formatInstantHHMM)
 ├── AppContainer.kt             Manual DI container for non-Hilt singletons (if needed)
 ├── MainActivity.kt             Auth gate — no deep link handler (decided against, §12)
 └── MoneyApplication.kt         Application; initializes SyncManager
@@ -1078,17 +1084,22 @@ Navigation section, no feature-flag switches (Money has nothing to disable):**
    title/copy, not "Bank notifications": Google Pay/Wallet isn't a bank,
    and the status line ("...suggesting drafts from Google Pay or banks")
    stays generic rather than naming specific banks, since the actual
-   whitelist (§18.2) may grow and isn't meant to be user-facing detail yet
-   (a picker to choose which sources are active is a possible follow-up).
-   Status text (`NotificationManagerCompat.getEnabledListenerPackages`
-   contains this app's package?) + a full-width button opening
-   `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`; rechecked on
+   whitelist (§18.2) may grow and isn't meant to be user-facing detail.
+   Which sources apply to which account is chosen per Account in
+   `AccountFormSheet` (§8.2/§18.2), not here.
+   Status text — three states: not granted, granted and connected, or
+   granted but the listener binding is currently dropped (error-colored;
+   `NotificationManagerCompat.getEnabledListenerPackages` vs.
+   `MoneyNotificationListenerService.isConnected()`) — + a full-width button
+   opening `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`; rechecked on
    `ON_RESUME` since the grant/revoke happens outside this screen. When
    access is granted, a second full-width button, "Rescan current
    notifications", calls
    `MoneyNotificationListenerService.rescanActiveNotifications()` — see
-   §18.6. Both buttons are `fillMaxWidth()` (not sized to their own text)
-   so they align consistently instead of two different widths side by side.
+   §18.6. While granted-but-disconnected, two more full-width buttons
+   appear: battery-optimization exemption and the MIUI autostart screen —
+   see §18.3. All buttons are `fillMaxWidth()` (not sized to their own
+   text) so they align consistently.
 
 ---
 
@@ -1607,7 +1618,7 @@ is scheduled after `FilterMenu`, not a design decision._
 
 ## 18. Transaction Drafts (notification-derived)
 
-New in `feature/notification-drafts` (not yet merged to `main`). A warm-up
+Shipped in v1.2. A warm-up
 feature exercising `NotificationListenerService`, a technique new to this
 project. Suggests transaction drafts from bank/payment app notifications;
 the user always confirms manually — nothing is written to Sheets
