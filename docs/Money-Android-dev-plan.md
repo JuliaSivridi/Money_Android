@@ -984,6 +984,20 @@ on Round 3's account-mapping feature:**
   unresolved draft now honestly requires picking an account by hand (`Save`
   was already disabled until one's chosen, so this costs nothing but a tap).
 
+**Round 7 — duplicate drafts from rescans:**
+- The listener connection now holds (Round 6), which exposed a Round 5
+  side effect: the same-source dedup is a 5-minute window anchored on the
+  draft's `createdAt`, fine for live posts but not for the automatic rescan
+  on every app open — a bank notification still in the shade was seen again
+  after the window and created a new draft each time (and would equally
+  have re-created a draft right after it was confirmed/deleted). Fixed with
+  a permanent local-only `processed_notifications` table (Room 3→4,
+  `(sourcePackage, notificationKey, postTime)` primary key, atomic insert
+  as the check, 30-day prune) consulted before the windowed checks, which
+  remain for what they were designed for (in-place updates, cross-source
+  correlation). Existing duplicate drafts created before this fix aren't
+  cleaned up automatically — delete them by hand.
+
 **Open / follow-up, not blocking this branch:**
 - All four parsers' amount-extraction is best-effort — no real notification
   sample was available for any of them while writing this. Every

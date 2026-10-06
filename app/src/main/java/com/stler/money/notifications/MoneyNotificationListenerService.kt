@@ -74,7 +74,7 @@ class MoneyNotificationListenerService : NotificationListenerService() {
 
         val parsed = runCatching {
             parser.parse(title, text, Instant.ofEpochMilli(sbn.postTime), sbn.key)
-        }.getOrNull()
+        }.getOrNull()?.copy(postedAtMillis = sbn.postTime)
 
         if (parsed == null) {
             Log.d(TAG, "Could not parse notification from ${sbn.packageName} — skipping")

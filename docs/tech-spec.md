@@ -349,9 +349,10 @@ position) and deduplicated. See [§16.7](#167-category-delete-with-transfer).
 
 ### 5.6 Room Database
 
-**Database name:** `money.db` · **Room version:** 3 (1→2 added
+**Database name:** `money.db` · **Room version:** 4 (1→2 added
 `transaction_drafts`; 2→3 added `transaction_drafts.accountId` and
-`account_notification_sources`, both §18 — greenfield otherwise, no legacy
+`account_notification_sources`; 3→4 added `processed_notifications` — all
+§18 — greenfield otherwise, no legacy
 Dexie migration baggage to replicate; Money PWA's `MoneyDB` → `MoneyDB2`
 migration history does not need porting). `fallbackToDestructiveMigration`
 is intentionally absent (see code review Phase 13 fix) — every version
@@ -474,6 +475,19 @@ created when a draft is confirmed goes through the normal write path.
 which whitelisted notification packages a given `Account` should be
 attributed to. Not part of `Account`'s own Sheets-mirrored columns (§5.7)
 and never synced: it has no meaning on another device or the PWA.
+
+#### Table: `processed_notifications` (added in Room version 4 — see §18.1)
+
+| Column | SQLite Type | Notes |
+|---|---|---|
+| sourcePackage | TEXT NOT NULL | part of composite primary key |
+| notificationKey | TEXT NOT NULL | `StatusBarNotification.key`; part of composite primary key |
+| postedAt | INTEGER NOT NULL | `StatusBarNotification.postTime` (ms); part of composite primary key |
+| processedAt | INTEGER NOT NULL | ms; only used to prune rows older than 30 days |
+
+Permanent "this exact notification already became a draft" record, local-only
+and never synced. Exists because a draft row is deleted on confirm/discard
+while the notification itself can remain in the shade for hours.
 
 ### 5.7 Google Sheets Schema
 
@@ -1593,6 +1607,18 @@ came from the live listener or a rescan (§18.6) — it resolves an `Account`
 for the event, dedups, and either inserts a new draft or merges into an
 existing one:
 
+0. **Permanent per-notification dedup (first, before anything else).**
+   `processed_notifications` (§5.6) is keyed on `(sourcePackage,
+   notificationKey, postTime)`; the insert is atomic (`OnConflictStrategy.IGNORE`,
+   result `-1` = already seen), so a live post racing a rescan on the same
+   notification can't both pass. Needed because the time windows in steps 2–3
+   only make sense for live posts: a notification stays in the shade for
+   hours, every app open rescans it (§18.6), and the draft row is deleted
+   on confirm/discard — so with windows alone, each rescan after 5 minutes
+   (or right after the user handled the draft) re-created it as a new
+   draft. `postTime` is part of the identity so a source that reuses one
+   key for a genuinely new post still produces a new draft. Rows older
+   than 30 days are pruned on each insert.
 1. **Resolve an Account.** `AccountRepository.accountIdsForNotificationPackage(sourcePackage)`
    returns every Account configured (§18.2) to recognize that package.
    Exactly one match resolves to that Account; zero or more than one is

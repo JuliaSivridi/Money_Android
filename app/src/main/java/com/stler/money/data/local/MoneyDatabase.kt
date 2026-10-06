@@ -5,12 +5,14 @@ import androidx.room.RoomDatabase
 import com.stler.money.data.local.dao.AccountDao
 import com.stler.money.data.local.dao.AccountNotificationSourceDao
 import com.stler.money.data.local.dao.CategoryDao
+import com.stler.money.data.local.dao.ProcessedNotificationDao
 import com.stler.money.data.local.dao.SyncQueueDao
 import com.stler.money.data.local.dao.TransactionDao
 import com.stler.money.data.local.dao.TransactionDraftDao
 import com.stler.money.data.local.entity.AccountEntity
 import com.stler.money.data.local.entity.AccountNotificationSourceEntity
 import com.stler.money.data.local.entity.CategoryEntity
+import com.stler.money.data.local.entity.ProcessedNotificationEntity
 import com.stler.money.data.local.entity.SyncQueueEntity
 import com.stler.money.data.local.entity.TransactionCategoryCrossRef
 import com.stler.money.data.local.entity.TransactionDraftEntity
@@ -25,8 +27,9 @@ import com.stler.money.data.local.entity.TransactionEntity
         SyncQueueEntity::class,
         TransactionDraftEntity::class,
         AccountNotificationSourceEntity::class,
+        ProcessedNotificationEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class MoneyDatabase : RoomDatabase() {
@@ -36,4 +39,5 @@ abstract class MoneyDatabase : RoomDatabase() {
     abstract fun syncQueueDao(): SyncQueueDao
     abstract fun transactionDraftDao(): TransactionDraftDao
     abstract fun accountNotificationSourceDao(): AccountNotificationSourceDao
+    abstract fun processedNotificationDao(): ProcessedNotificationDao
 }

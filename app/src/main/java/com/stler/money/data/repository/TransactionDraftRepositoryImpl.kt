@@ -1,6 +1,8 @@
 package com.stler.money.data.repository
 
+import com.stler.money.data.local.dao.ProcessedNotificationDao
 import com.stler.money.data.local.dao.TransactionDraftDao
+import com.stler.money.data.local.entity.ProcessedNotificationEntity
 import com.stler.money.data.local.entity.TransactionDraftEntity
 import com.stler.money.data.local.entity.toDomain
 import com.stler.money.domain.model.TransactionDraft
@@ -13,6 +15,7 @@ import javax.inject.Inject
 
 class TransactionDraftRepositoryImpl @Inject constructor(
     private val dao: TransactionDraftDao,
+    private val processedDao: ProcessedNotificationDao,
     private val accountRepository: AccountRepository,
 ) : TransactionDraftRepository {
 
@@ -22,6 +25,19 @@ class TransactionDraftRepositoryImpl @Inject constructor(
     override suspend fun deleteById(id: String) = dao.deleteById(id)
 
     override suspend fun recordNotification(parsed: ParsedDraft): Boolean {
+        // Permanent per-notification dedup, before everything else. The time windows below
+        // only suit live posts: a notification can sit in the shade for hours, every app open
+        // rescans it, and a draft row is deleted on confirm/discard — so without this, each
+        // rescan after the window (or after the user already handled the draft) re-created it.
+        // The insert is atomic (-1 = already recorded), so a live post and a rescan racing
+        // on the same notification can't both pass either.
+        val now = System.currentTimeMillis()
+        val firstTime = processedDao.insert(
+            ProcessedNotificationEntity(parsed.sourcePackage, parsed.notificationKey, parsed.postedAtMillis, now),
+        ) != -1L
+        if (!firstTime) return false
+        processedDao.pruneOlderThan(now - PROCESSED_RETENTION.toMillis())
+
         // Exactly one recognizing Account resolves it; zero or more than one is ambiguous
         // (left blank — the user picks manually in the form, same as an unmapped source).
         val resolvedAccountId = accountRepository.accountIdsForNotificationPackage(parsed.sourcePackage)
@@ -67,6 +83,9 @@ class TransactionDraftRepositoryImpl @Inject constructor(
     }
 
     private companion object {
+        // Far longer than any notification realistically stays in the shade.
+        val PROCESSED_RETENTION: Duration = Duration.ofDays(30)
+
         val SAME_SOURCE_WINDOW: Duration = Duration.ofMinutes(5)
 
         // Tighter than SAME_SOURCE_WINDOW — a fuzzier match (amount+currency only, no

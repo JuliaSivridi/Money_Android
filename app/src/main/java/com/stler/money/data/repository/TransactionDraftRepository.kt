@@ -12,6 +12,9 @@ data class ParsedDraft(
     val amount: Double,
     val currency: String,
     val date: String,
+    /** `StatusBarNotification.postTime` — set by the listener service (not the parsers), part
+     * of the permanent "already processed" identity alongside [notificationKey]. */
+    val postedAtMillis: Long = 0L,
 )
 
 interface TransactionDraftRepository {
