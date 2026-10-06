@@ -664,6 +664,14 @@ fixed above.
       Not yet dry-run (needs the release OAuth client's SHA-1 registration —
       done, propagating — and the Secrets, which the user was setting up as
       of this note).
+- [x] In-app update (tech-spec §14), ported from Tasks Android: `AboutScreen`
+      was a link to the releases page; it's now `AboutViewModel` +
+      `UpdateState` — checks `releases/latest`, downloads the APK to
+      `cacheDir/updates/`, installs via `FileProvider` +
+      `REQUEST_INSTALL_PACKAGES`. Manual, button-driven like Tasks (no
+      background check). Requires tag `vX.Y` ⇔ `versionName = "X.Y"` to stay
+      in sync. A release-signed APK can't update a debug-key install, so the
+      first release build must be a fresh install.
 - [ ] Dry-run the First-Time Setup doc (§15) on a clean machine/second dev —
       confirm no missing steps
 - [ ] Signed release build smoke test: fresh install, sign in, create

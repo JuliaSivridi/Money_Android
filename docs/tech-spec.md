@@ -1049,8 +1049,8 @@ user avatar (72dp circle, Coil `AsyncImage`, `AccountCircle` fallback), name
 color). Each row pushes the corresponding overlay.
 
 **About row — decided: yes, include it**, mirroring Tasks Android's `About`
-overlay (`BuildConfig.VERSION_NAME` + "Check for updates" → GitHub releases
-page). Money PWA has no such screen simply because it never needed one yet;
+overlay (`BuildConfig.VERSION_NAME` + "Check for updates", which updates
+the app in place — see §14 "In-app update"). Money PWA has no such screen simply because it never needed one yet;
 this is a new native app that will accumulate versions from day one, so the
 row — and the `About` overlay it opens — is in scope for v1, not deferred.
 
@@ -1319,6 +1319,34 @@ Mirrors Tasks Android's `release.yml` exactly, with app-specific naming.
 **Local/debug build:** no signing config when `KEYSTORE_PATH` is blank;
 `isMinifyEnabled = false` for release (no ProGuard obfuscation), same as
 Tasks Android.
+
+**In-app update** (`AboutScreen` + `AboutViewModel`, same flow as Tasks
+Android; manual, button-driven — no automatic background check). State
+machine `UpdateState`: Idle → Checking → UpToDate | UpdateAvailable →
+Downloading(progress) → ReadyToInstall | Error.
+
+1. **Check:** `GET https://api.github.com/repos/JuliaSivridi/Money_Android/releases/latest`
+   (public repo, unauthenticated). The release's `tag_name` is compared to
+   `"v" + BuildConfig.VERSION_NAME` — **the git tag, `versionName`, and the
+   release must stay in sync** (tag `v1.2` ⇔ `versionName = "1.2"`), or the
+   app reports an update forever / never. The APK is the first release asset
+   whose name ends in `.apk` (`stler-money.apk`, from `release.yml`).
+2. **Download:** streamed with a plain `OkHttpClient` (no Bearer interceptor,
+   no read timeout) into `cacheDir/updates/stler-money-update.apk`; progress
+   is emitted only when the integer percentage changes.
+3. **Install:** as soon as the state becomes `ReadyToInstall`, a
+   `FileProvider` URI (`${applicationId}.fileprovider`, `file_paths.xml`
+   exposes only `cache/updates/`) is passed to `ACTION_VIEW` with the APK
+   MIME type — the system installer takes over. Needs
+   `REQUEST_INSTALL_PACKAGES` in the manifest; Android additionally asks
+   the user once to allow "install unknown apps" for this app.
+
+**Signing caveat:** Android only installs an update signed with the same key
+as the installed app. A release APK (signed with the CI keystore) cannot
+update a build installed from Android Studio (debug key) — it fails with a
+package-conflict error, so the first release build must be installed fresh
+(uninstalling the debug build removes its local data: unsynced changes,
+drafts, per-account notification mapping); from then on in-app updates work.
 
 ---
 
